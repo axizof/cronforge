@@ -96,7 +96,6 @@ standard mode with a structured error.
 Built-in: `'en'`, `'fr'`, `'es'`, `'de'`, `'it'`. Add your own with
 `registerLocale(code, data)`. The locale data format is compatible with
 [`i18next`](https://www.i18next.com/) resource bundles - see
-[contracts/locale-format.md](./specs/001-core-toolkit/contracts/locale-format.md).
 
 Locale JSON files are also published alongside the package and can be imported
 directly into an i18next resource tree:
@@ -131,14 +130,6 @@ CronForge is a **compute** library. It deliberately does NOT:
 - [llms.txt](./llms.txt) - concise machine-readable index for AI assistants
   (per [llmstxt.org](https://llmstxt.org)); [llms-full.txt](./llms-full.txt)
   bundles the entire API reference, error vocabulary, and recipes in one file
-- [Specification](./specs/001-core-toolkit/spec.md) - feature scope, acceptance
-  criteria, success metrics
-- [Implementation plan](./specs/001-core-toolkit/plan.md) - tech choices,
-  architecture, constitution gates
-- [Public-API contract](./specs/001-core-toolkit/contracts/public-api.ts) -
-  the frozen TypeScript surface
-- [Constitution](./.specify/memory/constitution.md) - non-negotiable principles
-  that bind every change
 
 ## Testing
 

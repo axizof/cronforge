@@ -7,14 +7,6 @@ of every CronForge implementation. The TypeScript library
 The future Java port (`cronforge-java`) will vendor this directory
 verbatim and write a parallel runner.
 
-## Files
-
-| File | Purpose |
-|------|---------|
-| `cases.json` | Canonical fixture set - the parity contract. |
-| `cases.schema.json` | JSON-Schema describing the fixture shape (see [contracts/shared-tests-schema.md](../specs/001-core-toolkit/contracts/shared-tests-schema.md)). |
-| `README.md` | This file. |
-
 ## Editing rules
 
 1. **Treat `cases.json` as the source of truth.** When TS-side behaviour
