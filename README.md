@@ -126,6 +126,11 @@ CronForge is a **compute** library. It deliberately does NOT:
 
 ## Documentation
 
+- [examples.md](./examples.md) - copy-paste-ready snippets for every public
+  function plus real-world recipes (form preview, locale fallback, DST, i18next)
+- [llms.txt](./llms.txt) - concise machine-readable index for AI assistants
+  (per [llmstxt.org](https://llmstxt.org)); [llms-full.txt](./llms-full.txt)
+  bundles the entire API reference, error vocabulary, and recipes in one file
 - [Specification](./specs/001-core-toolkit/spec.md) - feature scope, acceptance
   criteria, success metrics
 - [Implementation plan](./specs/001-core-toolkit/plan.md) - tech choices,

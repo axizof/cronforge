@@ -1,7 +1,7 @@
 {
   "name": "cronforge",
   "version": "1.0.0",
-  "description": "Zero-dependency TypeScript toolkit for cron expressions — parse, validate, describe (multilingual), iterate, and build for both standard Unix (5-field) and Quartz (6–7 field) dialects.",
+  "description": "Zero-dependency TypeScript toolkit for cron expressions - parse, validate, describe (multilingual), iterate, and build for both standard Unix (5-field) and Quartz (6–7 field) dialects.",
   "keywords": [
     "cron",
     "crontab",
@@ -52,6 +52,9 @@
   "types": "./dist/index.d.mts",
   "files": [
     "dist",
+    "examples.md",
+    "llms.txt",
+    "llms-full.txt",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

@@ -1,0 +1,33 @@
+# CronForge
+
+> Zero-dependency TypeScript toolkit for cron expressions: parse, validate, describe (multilingual), compute next occurrences, and build from structured input. Supports standard Unix (5-field) and Quartz (6–7 field) dialects. Pure compute library — does NOT run jobs, ship UI, or require a framework.
+
+CronForge unifies five capabilities behind six top-level functions. It is
+strictly typed, fully immutable, ESM + CommonJS dual-package, and tree-shakeable.
+Default mode selection is explicit (`'standard' | 'quartz'`); `'auto'` is opt-in.
+
+## Public API
+
+- [parse, tryParse](./src/index.ts): `string → CronExpression` and `string → Result<CronExpression, ParseError>` (never throws).
+- [validate](./src/index.ts): `string → ValidationResult`. NEVER throws — returns structured `{ valid, errors[] }` for any input.
+- [describe](./src/index.ts): `string | CronExpression × locale → string`. Built-in locales: `en`, `fr`, `es`, `de`, `it`. Unknown locales fall back to `en` (observable via `onFallback`).
+- [nextOccurrences](./src/index.ts): `expr × count × { mode, startFrom?, timezone? } → Date[]`. IANA-timezone-aware, DST-correct (spring-forward = skip; fall-back = fire once at first instance).
+- [build, buildResult](./src/index.ts): `CronBuilderInput → string`. 11 input variants for form-driven UIs. Throws or returns `Result` per variant.
+- [registerLocale](./src/index.ts): runtime registration of additional locale bundles (i18next-compatible shape).
+
+## Modes (Constitution Principle V — explicit string literal unions)
+
+- `'standard'`: 5 fields (minute hour dom month dow), dow numbering SUN=0..SAT=6, dom/dow combined with OR semantics (POSIX crontab(5)).
+- `'quartz'`: 6 or 7 fields (seconds minute hour dom month dow [year]), dow numbering SUN=1..SAT=7, dom/dow exclusive via `?`. Supports `?`, `L`, `L-N`, `nL`, `nW`, `n#m`.
+- `'auto'`: detects based on field count + presence of Quartz-only chars (`?`, `L`, `W`, `#`).
+
+## Macros (standard mode only)
+
+`@hourly`, `@daily`, `@midnight`, `@weekly`, `@monthly`, `@yearly`, `@annually` expand at parse time. `@reboot` is parseable but not iterable (`nextOccurrences()` rejects it with `code: 'reboot-not-iterable'`).
+
+## Optional
+
+- [shared-tests/cases.json](./shared-tests/cases.json): 53 canonical fixtures consumed by the TS test suite; reusable by future Java port.
+- [shared-tests/cases.schema.json](./shared-tests/cases.schema.json): JSON Schema for the fixture format.
+- [src/describer/locales/](./src/describer/locales/): five locale bundles as both `.ts` (runtime) and `.json` (i18next-compatible).
+- [test/integration/](./test/integration/): end-to-end suites covering parse-describe, parse-validate, DST, and the shared fixtures.

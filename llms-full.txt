@@ -1,0 +1,410 @@
+# CronForge — full reference for LLMs
+
+> Zero-dependency TypeScript toolkit for cron expressions. Parses, validates,
+> describes (multilingual), iterates next occurrences (DST-aware), and builds
+> from structured input. Supports standard Unix (5-field) and Quartz (6–7 field)
+> dialects. Pure compute library — does NOT run jobs, does NOT ship UI, does
+> NOT require a framework.
+
+This file gives an LLM everything it needs to write correct cronforge code
+without consulting source. Pair with [llms.txt](./llms.txt) for the high-level
+map.
+
+---
+
+## Install
+
+```bash
+npm install cronforge
+```
+
+Requires Node.js 18+. Works in modern browsers. Dual ESM + CJS shipped, with
+matching `.d.ts` per condition.
+
+## Import surface
+
+Everything below is exported from the package root (`'cronforge'`). The package
+has exactly these public symbols — nothing else is supported:
+
+```ts
+import {
+  // Functions
+  parse, tryParse,           // string → CronExpression (or Result)
+  validate,                  // string → ValidationResult (never throws)
+  describe,                  // expr × locale → string
+  nextOccurrences,           // expr × count → Date[]
+  build, buildResult,        // CronBuilderInput → string (or Result)
+  registerLocale,            // runtime locale extension
+
+  // Error / result classes
+  ParseError,                // thrown by parse() and build()
+
+  // Types — modes, fields, errors
+  type CronMode,             // 'standard' | 'quartz' | 'auto'
+  type ResolvedCronMode,     // 'standard' | 'quartz'  (never 'auto')
+  type FieldName,            // 'seconds'|'minute'|'hour'|'dom'|'month'|'dow'|'year'|'whole'
+  type MacroName,            // '@hourly'|'@daily'|'@midnight'|'@weekly'|'@monthly'|'@yearly'|'@annually'|'@reboot'
+  type SourcePosition,       // { start, end } — character offsets
+
+  // Types — AST
+  type FieldAst,             // discriminated union per field
+  type FieldSet,             // { seconds?, minute, hour, dom, month, dow, year? }
+  type CronExpression,       // immutable parsed expression
+
+  // Types — errors
+  type ValidationError,
+  type ValidationResult,
+  type BuildError,
+  type Result,               // discriminated union { ok, value } | { ok, error }
+
+  // Types — describer
+  type Locale,               // 'en'|'fr'|'es'|'de'|'it' (or any registered code)
+  type LocaleData,
+  type TimeFormat,           // '12h' | '24h'
+  type DescribeOptions,
+
+  // Types — iterator
+  type NextOccurrencesOptions,
+
+  // Types — builder
+  type BuildOptions,         // { mode: 'standard' | 'quartz' }
+  type CronBuilderInput,     // discriminated union of 11 variants
+  type Weekday,              // 0..6 | 'SUN'..'SAT'
+  type Month,                // 1..12 | 'JAN'..'DEC'
+  type TimeOfDay,            // { hour, minute, second? }
+
+  // Per-function options
+  type ParseOptions,         // { mode: CronMode }
+  type ValidateOptions,      // { mode: CronMode }
+} from 'cronforge';
+```
+
+Locale JSON files are exposed as sub-paths for direct consumption (e.g. by i18next):
+
+```ts
+import fr from 'cronforge/locales/fr.json' with { type: 'json' };
+```
+
+---
+
+## Modes and dialect rules
+
+### Standard mode (`'standard'`)
+- **Field count**: exactly 5 — `minute hour dom month dow`
+- **Day-of-week numbering**: SUN=0, MON=1, …, SAT=6
+- **dom / dow combination**: OR semantics — a date matches if dom OR dow matches (POSIX crontab(5) tradition)
+- **Macros**: `@hourly`, `@daily`, `@midnight`, `@weekly`, `@monthly`, `@yearly`, `@annually`, `@reboot`
+- **Quartz operators rejected**: `?`, `L`, `W`, `#` produce `code: 'quartz-only-feature-in-standard'`
+
+### Quartz mode (`'quartz'`)
+- **Field count**: 6 or 7 — `seconds minute hour dom month dow [year]`
+- **Day-of-week numbering**: SUN=1, MON=2, …, SAT=7
+- **dom / dow combination**: EXCLUSIVE via `?` — exactly one of dom/dow MUST be `?` when the other is specified (otherwise `code: 'quartz-dom-dow-conflict'`)
+- **Macros**: REJECTED in Quartz mode (`code: 'macro-in-quartz'`)
+- **Supported operators**:
+  - `?` (Any) — dom or dow only
+  - `L` — last day of month (dom field)
+  - `L-N` — N days before end of month, N ∈ 1..30
+  - `nL` — last occurrence of weekday n in the month (dow field)
+  - `nW` — weekday closest to day n (dom field)
+  - `n#m` — m-th occurrence of weekday n in the month (m ∈ 1..5)
+- **Year field range**: 1970..2199
+
+### Auto mode (`'auto'`)
+- 5 fields with no Quartz-only chars → `'standard'`
+- 6 or 7 fields → `'quartz'`
+- 5 fields with any of `?`, `L`, `W`, `#` → `code: 'auto-detect-failed'`
+- 4 fields or 8+ fields → `code: 'auto-detect-failed'`
+
+---
+
+## Field syntax
+
+Per field (in either dialect):
+- `*` — any value (wildcard)
+- `5` — single value
+- `1-5` — inclusive range
+- `*/5` — step on wildcard (every 5)
+- `0-30/10` — step on range
+- `1,3,5` — list (members may be values, ranges, or steps)
+- `JAN`/`MON` — case-insensitive mnemonics (month and dow only)
+
+**Forbidden**:
+- `5/2` — step base must be `*` or a range (`code: 'step-base-invalid'`)
+- `*/0` — step must be positive (`code: 'step-not-positive'`)
+- `30-10` — range must be ascending (`code: 'range-inverted'`)
+- Nested lists (a list inside a list)
+- Empty list members (`1,,3`)
+
+---
+
+## Per-function reference
+
+### `parse(expression: string, options: { mode: CronMode }): CronExpression`
+Throws `ParseError` on any invalid input. The returned `CronExpression` is
+deeply frozen.
+
+```ts
+const expr = parse('*/5 * * * *', { mode: 'standard' });
+// expr.dialect       → 'standard'
+// expr.fields.minute → { kind: 'step', base: { kind: 'wildcard' }, step: 5 }
+// expr.macro         → null
+// expr.hasReboot     → false
+```
+
+### `tryParse(expression: string, options: { mode: CronMode }): Result<CronExpression, ParseError>`
+Never throws — wraps every error in a `Result.err`. Use when handling user
+input.
+
+```ts
+const r = tryParse(formValue, { mode: 'standard' });
+if (r.ok) {
+  use(r.value);
+} else {
+  show(r.error.errors[0]);
+}
+```
+
+### `validate(expression: string, options: { mode: CronMode }): ValidationResult`
+Never throws. Returns `{ valid: boolean, errors: ValidationError[] }` for any
+input including empty / whitespace / oversized / non-string.
+
+```ts
+type ValidationError = {
+  readonly field: FieldName | null;
+  readonly position: { readonly start: number; readonly end: number };
+  readonly code: string;           // stable across versions — use as i18n key
+  readonly message: string;        // English (not localised)
+  readonly suggestion: string | null;
+};
+```
+
+### `describe(input: string | CronExpression, options): string`
+Pretty-print in a locale. Accepts both raw cron strings (parsed internally
+with the given mode) and pre-parsed `CronExpression` objects.
+
+```ts
+type DescribeOptions = {
+  readonly mode: CronMode;
+  readonly locale: Locale;
+  readonly onFallback?: (requested: Locale, used: Locale) => void;
+};
+```
+
+Built-in locales: `'en'`, `'fr'`, `'es'`, `'de'`, `'it'`. Unknown locales
+fall back to `'en'`; the fallback is observable via `onFallback`.
+
+### `nextOccurrences(input, count, options): ReadonlyArray<Date>`
+Compute the next `count` fire times strictly after `options.startFrom`
+(default: current time).
+
+```ts
+type NextOccurrencesOptions = {
+  readonly mode: CronMode;
+  readonly startFrom?: Date;       // default = new Date()
+  readonly timezone?: string;      // IANA name (default 'UTC')
+};
+```
+
+- Returns frozen array of `Date` instances in ascending order.
+- `count === 0` returns `[]` (not an error).
+- Throws `ParseError` with `code: 'reboot-not-iterable'` for `@reboot`.
+- Throws `ParseError` with `code: 'no-match-in-search-window'` if no match found within 50 000 internal iteration steps (e.g. impossible expression).
+- Throws `ParseError` with `code: 'invalid-count'` for negative `count`.
+- Throws `ParseError` with `code: 'count-too-large'` for `count > 100_000`.
+- Throws `ParseError` with `code: 'invalid-start-from'` for `new Date(NaN)`.
+
+**DST policy** (deterministic, tested):
+- **Spring-forward gap** (non-existent local time): iterator advances to the next valid local time matching the expression. Example: `30 2 * * *` in `Europe/Paris` on 2026-03-29 fires next on 2026-03-30 at 02:30 local.
+- **Fall-back overlap** (duplicated local time): iterator fires ONCE at the FIRST wall-clock instance (with the pre-rollback offset). Example: `30 2 * * *` in `Europe/Paris` on 2026-10-25 fires at the CEST 02:30 (= 00:30 UTC).
+
+### `build(input: CronBuilderInput, options: { mode: 'standard'|'quartz' }): string`
+Build a cron string from a structured input. Throws `ParseError` (wrapping a
+`BuildError`) on invalid input. Use `buildResult()` for the never-throws
+variant returning `Result<string, BuildError>`.
+
+`build()` self-verifies its output by re-parsing — if the round-trip fails,
+that is a library bug (`code: 'roundtrip-failed'`).
+
+### `registerLocale(code: string, data: LocaleData): void`
+Add or override a runtime locale. The library deeply-freezes the data on
+registration.
+
+---
+
+## `CronBuilderInput` variants
+
+All 11 variants, with the cron string they produce:
+
+```ts
+// every N units (n ≥ 1)
+{ kind: 'everyN', unit: 'minute' | 'hour' | 'day' | 'month' | 'year', n: number }
+
+// fires every day at the given times
+{ kind: 'at', times: ReadonlyArray<TimeOfDay> }            // times.length ≥ 1
+
+// fires on the listed weekdays at the given time
+{ kind: 'daysOfWeek', days: ReadonlyArray<Weekday>, at: TimeOfDay }
+
+// fires on the listed days-of-month at the given time
+{ kind: 'daysOfMonth', days: ReadonlyArray<number>, at: TimeOfDay }    // days[i] ∈ 1..31
+
+// fires once per hour within [from, to] at `minute` (default 0)
+{ kind: 'hourRange', from: number, to: number, minute?: number }       // 0 ≤ from ≤ to ≤ 23
+
+// fires within the month range, optionally only at a specific time
+{ kind: 'monthRange', from: Month, to: Month, at?: TimeOfDay }
+
+// QUARTZ ONLY — m-th <weekday> of month
+{ kind: 'nthWeekdayOfMonth', nth: 1|2|3|4|5, weekday: Weekday, at: TimeOfDay }
+
+// QUARTZ ONLY — last day of month
+{ kind: 'lastDayOfMonth', at: TimeOfDay }
+
+// QUARTZ ONLY — last <weekday> of month
+{ kind: 'lastWeekdayOfMonth', weekday: Weekday, at: TimeOfDay }
+
+// QUARTZ ONLY — weekday nearest to day N
+{ kind: 'weekdayNearestTo', day: number, at: TimeOfDay }               // day ∈ 1..31
+
+// combine multiple parts (fires when ANY part fires)
+{ kind: 'composite', parts: ReadonlyArray<CronBuilderInput> }          // parts.length ≥ 1
+```
+
+Where:
+
+```ts
+type Weekday = 0|1|2|3|4|5|6 | 'SUN'|'MON'|'TUE'|'WED'|'THU'|'FRI'|'SAT';
+type Month   = 1..12 | 'JAN'..'DEC';
+type TimeOfDay = { readonly hour: number; readonly minute: number; readonly second?: number };
+```
+
+`second` may only appear when `mode === 'quartz'`.
+
+### `BuildError.code` vocabulary
+- `mode-incompatibility` — Quartz-only variant requested with `mode: 'standard'`, OR `TimeOfDay.second` in standard mode.
+- `out-of-range` — numeric value outside its field range.
+- `empty-list` — `at.times`, `daysOfWeek.days`, or `daysOfMonth.days` was empty.
+- `composite-empty` — `composite.parts.length === 0`.
+- `composite-mode-mismatch` — a composite part is incompatible with the requested mode.
+- `invalid-mode` — `options.mode` was not `'standard'` or `'quartz'`.
+- `roundtrip-failed` — internal bug; the serialised output did not re-parse.
+- `internal-error` — unexpected runtime error in the builder.
+
+---
+
+## Stable `ValidationError.code` vocabulary
+
+Use these as i18n keys in consuming UIs. They are stable across patch and
+minor releases.
+
+- `empty-input` — empty / whitespace-only source
+- `not-a-string` — non-string passed to `parse()`
+- `unknown-macro` — `@foo` etc.
+- `macro-in-quartz` — macro used in `mode: 'quartz'`
+- `field-count-standard` — 5 fields required in standard mode
+- `field-count-quartz` — 6 or 7 fields required in Quartz mode
+- `auto-detect-failed` — `mode: 'auto'` could not resolve
+- `value-out-of-range` — numeric value outside its field range
+- `range-inverted` — `from > to`
+- `step-not-positive` — `*/0` or non-integer step
+- `step-base-invalid` — step base must be `*` or a range
+- `invalid-literal` — token not a number or mnemonic
+- `empty-field` — empty whitespace-delimited token (shouldn't happen — defensive)
+- `empty-list-member` — `1,,3`
+- `nested-list` — a list inside a list (defensive)
+- `quartz-dom-dow-conflict` — both dom and dow non-`?` in Quartz
+- `quartz-dom-dow-both-any` — both `?` in Quartz (no day to fire)
+- `quartz-only-feature-in-standard` — `?` / `L` / `W` / `#` in standard mode
+- `any-not-allowed-here` — `?` outside dom/dow
+- `last-dom-not-allowed-here` — `L` / `L-N` outside dom
+- `last-dom-offset-out-of-range` — `L-N` with N ∉ 1..30
+- `invalid-last-dom-offset` — `L-x` etc.
+- `last-dow-not-allowed-here` — `nL` outside dow
+- `weekday-nearest-not-allowed-here` — `nW` outside dom
+- `nth-dow-not-allowed-here` — `n#m` outside dow
+- `unsupported-token` — bare `?` in a non-dom/dow field, etc.
+- `internal-error` — defence-in-depth wrapper around unexpected throws
+
+`ParseError.code` adds:
+- `invalid-count`, `count-too-large`, `invalid-start-from`, `reboot-not-iterable`, `no-match-in-search-window` (from the iterator).
+
+---
+
+## Immutability guarantees
+
+- Every value returned by a public function is deeply frozen at construction.
+- `nextOccurrences()` returns a frozen array (the `Date` instances inside are NOT frozen — JS `Date` cannot be meaningfully frozen, but the array is).
+- `LocaleRegistry.register()` deep-freezes the bundle.
+- `ParseError.errors` and `ValidationResult.errors` are frozen arrays.
+
+---
+
+## Anti-patterns
+
+- Don't mutate AST nodes — they're frozen.
+- Don't use booleans in option objects — the public API only accepts string literal unions.
+- Don't import from internal paths like `cronforge/src/...` — only the documented exports are supported.
+- Don't pass non-string to `parse()` — it'll throw. Use `tryParse()` which handles it.
+- Don't wrap `validate()` or `tryParse()` in `try/catch` — they never throw.
+- Don't expect `nextOccurrences()` to work on `@reboot` — it's a daemon trigger, not a schedule.
+- Don't rely on `@example` JSDoc blocks for current behaviour over this file or [examples.md](./examples.md). The doc files are kept in sync; the JSDoc is auto-generated from the source and may lag.
+
+---
+
+## Recipes
+
+### Form-driven cron picker (live preview)
+
+```ts
+import { buildResult, describe } from 'cronforge';
+
+function preview(input: CronBuilderInput, locale: Locale) {
+  const r = buildResult(input, { mode: 'standard' });
+  if (!r.ok) return { error: r.error };
+  return {
+    cron: r.value,
+    human: describe(r.value, { mode: 'standard', locale }),
+  };
+}
+```
+
+### Display next 5 fires in user's timezone
+
+```ts
+import { nextOccurrences } from 'cronforge';
+
+function previewSchedule(cron: string, tz: string) {
+  try {
+    return nextOccurrences(cron, 5, {
+      mode: 'auto',
+      timezone: tz,
+      startFrom: new Date(),
+    });
+  } catch (e) {
+    return [];
+  }
+}
+```
+
+### Validate at the form-field boundary
+
+```ts
+import { validate } from 'cronforge';
+
+function fieldErrorMessage(value: string, mode: 'standard' | 'quartz', t: (key: string) => string) {
+  const r = validate(value, { mode });
+  if (r.valid) return null;
+  const e = r.errors[0]!;
+  return t(`cron.error.${e.code}`);  // i18n key from the stable code vocabulary
+}
+```
+
+### Replace heavyweight scheduling libraries
+
+CronForge does NOT execute jobs. Pair it with `node-cron`, `bull`,
+Kubernetes CronJobs, etc. CronForge handles validation, preview,
+description, and structured input → string; the executor handles
+actually firing.
+
+---
