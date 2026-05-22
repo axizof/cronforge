@@ -1,12 +1,6 @@
 import type { ResolvedCronMode, SourcePosition } from '../../ast/dialect.js';
 import type { ValidationError } from '../../parser/errors.js';
 
-/**
- * Validate the raw whitespace-delimited token count against the dialect.
- *
- * Standard mode: exactly 5 fields.
- * Quartz mode:   6 or 7 fields (seconds + 5 or 6).
- */
 export function checkFieldCount(
   dialect: ResolvedCronMode,
   tokenCount: number,

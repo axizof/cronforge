@@ -2,10 +2,6 @@ import { interpolate } from './interpolate.js';
 import type { FieldAst } from '../../ast/nodes.js';
 import type { LocaleData } from '../locales/index.js';
 
-/**
- * Render the month clause. Returns `null` when the month field is a
- * wildcard (nothing to say).
- */
 export function renderMonth(node: FieldAst, locale: LocaleData): string | null {
   switch (node.kind) {
     case 'wildcard':

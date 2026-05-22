@@ -1,9 +1,3 @@
-/**
- * Public `CronBuilderInput` discriminated union and per-variant type
- * guards / validators. See `contracts/builder-input.md` for the
- * authoritative per-variant rules.
- */
-
 import type { ResolvedCronMode } from '../ast/dialect.js';
 import { makeBuildError } from './errors.js';
 import type { BuildError } from './errors.js';
@@ -43,11 +37,6 @@ const QUARTZ_ONLY_VARIANTS = new Set([
   'weekdayNearestTo',
 ]);
 
-/**
- * Validate a `CronBuilderInput` against the chosen mode. Returns `null`
- * on success, otherwise a structured `BuildError` (per
- * contracts/builder-input.md §Error contract).
- */
 export function validateInput(
   input: CronBuilderInput,
   mode: ResolvedCronMode,
@@ -122,9 +111,7 @@ export function validateInput(
     case 'monthRange':
       return input.at !== undefined ? validateTime(input.at, mode) : null;
     case 'nthWeekdayOfMonth':
-      return validateTime(input.at, mode);
     case 'lastDayOfMonth':
-      return validateTime(input.at, mode);
     case 'lastWeekdayOfMonth':
       return validateTime(input.at, mode);
     case 'weekdayNearestTo':
@@ -149,11 +136,7 @@ function validateEveryN(
     });
   }
   const max: Record<typeof input.unit, number> = {
-    minute: 60,
-    hour: 24,
-    day: 31,
-    month: 12,
-    year: 100,
+    minute: 60, hour: 24, day: 31, month: 12, year: 100,
   };
   if (input.n > max[input.unit]) {
     return makeBuildError({
@@ -212,10 +195,6 @@ function validateTime(t: TimeOfDay, mode: ResolvedCronMode): BuildError | null {
   return null;
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers used by per-variant AST builders.
-// ---------------------------------------------------------------------------
-
 const MONTH_MAP: Readonly<Record<string, number>> = Object.freeze({
   JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6,
   JUL: 7, AUG: 8, SEP: 9, OCT: 10, NOV: 11, DEC: 12,
@@ -229,14 +208,12 @@ const QUARTZ_DOW_MAP: Readonly<Record<string, number>> = Object.freeze({
   SUN: 1, MON: 2, TUE: 3, WED: 4, THU: 5, FRI: 6, SAT: 7,
 });
 
-/** Normalise a `Weekday` literal to its dialect numeric value. */
 export function resolveWeekday(w: Weekday, mode: ResolvedCronMode): number {
   if (typeof w === 'number') return w;
   const map = mode === 'standard' ? STD_DOW_MAP : QUARTZ_DOW_MAP;
   return map[w]!;
 }
 
-/** Normalise a `Month` literal to its numeric value. */
 export function resolveMonth(m: Month): number {
   if (typeof m === 'number') return m;
   return MONTH_MAP[m]!;

@@ -1,13 +1,5 @@
 import type { LocaleData } from './index.js';
 
-/**
- * French locale data - eagerly registered at module load.
- *
- * The canonical JSON form is kept at `./fr.json` for downstream consumers
- * who want to vendor it into their own `i18next` resource tree (per
- * contracts/locale-format.md). The TS module below is the runtime source
- * of truth - keep both in sync.
- */
 export const frLocale: LocaleData = {
   meta: { code: 'fr', name: 'Français', version: '1.0.0', timeFormat: '24h', timeSeparator: 'h' },
   atoms: {

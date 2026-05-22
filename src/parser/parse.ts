@@ -20,28 +20,22 @@ import { parseField } from './field-parser.js';
 import { checkFieldCount } from '../validator/rules/field-count.js';
 import { unknownMacroError } from '../validator/rules/unknown-macro.js';
 
-/** Options accepted by `parse()` and `tryParse()`. */
 export interface ParseOptions {
   readonly mode: CronMode;
 }
 
 /**
- * Parse a cron expression string into an immutable `CronExpression`.
- *
- * Throws `ParseError` for any syntactically or semantically invalid
- * input. For a result-style alternative that never throws, use
- * `tryParse()`.
+ * Parse a cron expression into an immutable `CronExpression`.
  *
  * @example
  * ```ts
  * import { parse } from 'cronforge';
  *
- * const expr = parse('* * * 6-8 *', { mode: 'standard' });
- * expr.dialect; // 'standard'
- * expr.fields.month.kind; // 'range'
+ * parse('* * * 6-8 *', { mode: 'standard' });
+ * // CronExpression { dialect: 'standard', fields: { month: { kind: 'range', from: 6, to: 8 }, ... } }
  * ```
  *
- * @throws {ParseError} when the expression cannot be parsed.
+ * @throws {ParseError} when the expression is invalid.
  */
 export function parse(expression: string, options: ParseOptions): CronExpression {
   const result = parseInternal(expression, options);
@@ -50,20 +44,14 @@ export function parse(expression: string, options: ParseOptions): CronExpression
 }
 
 /**
- * Parse a cron expression and return a `Result<CronExpression, ParseError>`.
- *
- * Never throws - including for empty input, oversized input, or
- * unexpected runtime errors (which are wrapped into a synthesized
- * `ParseError`).
+ * Parse a cron expression and return a `Result`. Never throws.
  *
  * @example
  * ```ts
  * import { tryParse } from 'cronforge';
  *
  * const r = tryParse('not a cron', { mode: 'standard' });
- * if (!r.ok) {
- *   console.error(r.error.errors[0].message);
- * }
+ * if (!r.ok) console.error(r.error.errors[0].message);
  * ```
  */
 export function tryParse(
@@ -76,10 +64,6 @@ export function tryParse(
     return err(wrapUnexpected(expression, e));
   }
 }
-
-// ---------------------------------------------------------------------------
-// internal - shared by parse() and tryParse()
-// ---------------------------------------------------------------------------
 
 function parseInternal(
   expression: string,
@@ -129,7 +113,6 @@ function parseInternal(
     return parseFromMacro(expression, tokens.macro, tokens.position, options.mode);
   }
 
-  // tokens.kind === 'fields'
   return parseFromFields(expression, tokens.fields, options.mode);
 }
 
@@ -139,8 +122,6 @@ function parseFromMacro(
   position: SourcePosition,
   mode: CronMode,
 ): Result<CronExpression, ParseError> {
-  // Macros are by spec standard-mode 5-field equivalents. Reject when the
-  // user explicitly chose Quartz (mode mismatch).
   if (mode === 'quartz') {
     const ve: ValidationError = {
       field: 'whole',
@@ -153,7 +134,6 @@ function parseFromMacro(
   }
   const fields = expandMacro(macro);
   if (fields === null) {
-    // @reboot - parseable but produces a no-schedule expression.
     return ok(
       makeCronExpression({
         source,
@@ -165,13 +145,7 @@ function parseFromMacro(
     );
   }
   return ok(
-    makeCronExpression({
-      source,
-      dialect: 'standard',
-      fields,
-      macro,
-      hasReboot: false,
-    }),
+    makeCronExpression({ source, dialect: 'standard', fields, macro, hasReboot: false }),
   );
 }
 
@@ -195,13 +169,10 @@ function parseFromFields(
   }
 
   const fcErr = checkFieldCount(dialect, rawTokens.length, wholePos);
-  if (fcErr !== null) {
-    return err(makeParseError(source, fcErr.code, fcErr.message, [fcErr]));
-  }
+  if (fcErr !== null) return err(makeParseError(source, fcErr.code, fcErr.message, [fcErr]));
 
   const order = fieldOrderFor(dialect, rawTokens.length);
   if (order === null) {
-    // checkFieldCount should have caught this; defence in depth.
     return err(
       makeParseError(source, 'field-count-unknown', 'Unknown field count', [
         {
@@ -253,13 +224,7 @@ function parseFromFields(
       : assembleQuartzFieldSet(built);
 
   return ok(
-    makeCronExpression({
-      source,
-      dialect,
-      fields,
-      macro: null,
-      hasReboot: false,
-    }),
+    makeCronExpression({ source, dialect, fields, macro: null, hasReboot: false }),
   );
 }
 
@@ -272,9 +237,7 @@ function assembleQuartzFieldSet(built: Partial<Record<FieldName, FieldAst>>): Fi
     month: built.month as FieldAst,
     dow: built.dow as FieldAst,
   };
-  if (built.year !== undefined) {
-    return { ...base, year: built.year };
-  }
+  if (built.year !== undefined) return { ...base, year: built.year };
   return base;
 }
 

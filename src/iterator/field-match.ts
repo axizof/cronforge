@@ -1,10 +1,7 @@
 import type { FieldAst } from '../ast/nodes.js';
 
-/**
- * True iff `value` matches the given field AST. Used by the iterator on
- * minute, hour, month, year, second, and dom/dow when no Quartz extras
- * are involved (those use `day-match.ts`).
- */
+/** Scalar match used by minute/hour/month/year/second and simple dom/dow.
+ *  Quartz day extensions (L, W, #) are handled in `day-match.ts`. */
 export function matches(ast: FieldAst, value: number): boolean {
   switch (ast.kind) {
     case 'wildcard':
@@ -17,27 +14,20 @@ export function matches(ast: FieldAst, value: number): boolean {
     case 'step':
       return matchesStep(ast.base, ast.step, value);
     case 'list':
-      for (const m of ast.members) {
-        if (matches(m, value)) return true;
-      }
+      for (const m of ast.members) if (matches(m, value)) return true;
       return false;
-    // Quartz day extensions never match via this function - handled by
-    // `day-match.ts`. Return false here as a defensive default.
     case 'lastDom':
     case 'lastDow':
     case 'weekdayNearest':
     case 'nthDow':
       return false;
     default:
-      // Exhaustiveness check for unknown future variants.
       return false;
   }
 }
 
 function matchesStep(base: FieldAst, step: number, value: number): boolean {
-  if (base.kind === 'wildcard') {
-    return value % step === 0;
-  }
+  if (base.kind === 'wildcard') return value % step === 0;
   if (base.kind === 'range') {
     if (value < base.from || value > base.to) return false;
     return (value - base.from) % step === 0;
@@ -45,10 +35,7 @@ function matchesStep(base: FieldAst, step: number, value: number): boolean {
   return false;
 }
 
-/**
- * Return the smallest `value >= from` (and `<= max`) that matches `ast`,
- * or `null` if none exists in the field's range.
- */
+/** Smallest matching `value` in `[max(from, min), max]`, or `null`. */
 export function nextMatch(
   ast: FieldAst,
   from: number,

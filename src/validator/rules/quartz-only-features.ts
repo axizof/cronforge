@@ -1,11 +1,6 @@
 import type { FieldName, ResolvedCronMode, SourcePosition } from '../../ast/dialect.js';
 import type { ValidationError } from '../../parser/errors.js';
 
-/**
- * Reject Quartz-only syntactic features (`?`, `L`, `W`, `#`) when they
- * appear in standard mode. Called by the field parser at each
- * site that might encounter one.
- */
 export function checkQuartzOnlyFeature(
   feature: '?' | 'L' | 'W' | '#',
   dialect: ResolvedCronMode,

@@ -8,11 +8,10 @@ import { matches, nextMatch } from './field-match.js';
 import { dayMatches } from './day-match.js';
 import { MAX_ITERATION_STEPS } from './dst.js';
 
-/** Options accepted by `nextOccurrences()`. */
 export interface NextOccurrencesOptions {
   readonly mode: CronMode;
   readonly startFrom?: Date;
-  /** IANA timezone name (e.g. `'Europe/Paris'`). Defaults to `'UTC'`. */
+  /** IANA timezone name (default `'UTC'`). */
   readonly timezone?: string;
 }
 
@@ -21,14 +20,12 @@ const QUARTZ_MIN_YEAR = 1970;
 const QUARTZ_MAX_YEAR = 2199;
 
 /**
- * Compute the next `count` fire times of a cron expression, strictly
- * after `options.startFrom` (default: current time).
+ * Compute the next `count` fire times strictly after `options.startFrom`
+ * (default: now). Returns a frozen array in ascending order.
  *
- * Returns a frozen `ReadonlyArray<Date>` in ascending order. Returns the
- * empty array for `count === 0`. Throws `ParseError` for `@reboot`
- * (FR-021), for `count < 0`, for `count > 100_000`, or when no match is
- * found within the internal search window
- * (`'no-match-in-search-window'`, per spec Edge Cases).
+ * Throws `ParseError` for `@reboot` (`reboot-not-iterable`), invalid
+ * `count`, invalid `startFrom`, or when no match is found within the
+ * iteration ceiling (`no-match-in-search-window`).
  *
  * @example
  * ```ts
@@ -39,7 +36,7 @@ const QUARTZ_MAX_YEAR = 2199;
  *   startFrom: new Date('2026-06-01T10:00:00Z'),
  *   timezone: 'UTC',
  * });
- * // -> [2026-06-01T10:05Z, 2026-06-01T10:10Z, 2026-06-01T10:15Z]
+ * // [2026-06-01T10:05Z, 10:10Z, 10:15Z]
  * ```
  */
 export function nextOccurrences(
@@ -98,61 +95,37 @@ export function nextOccurrences(
   return Object.freeze(results);
 }
 
-// ---------------------------------------------------------------------------
-// internal
-// ---------------------------------------------------------------------------
-
 function computeNext(expr: CronExpression, fromUtc: Date, tz: string): Date {
   const hasSeconds = expr.fields.seconds !== undefined;
   const stepMs = hasSeconds ? 1000 : 60_000;
 
-  // Start one tick after `fromUtc`, rounded up to the field-precision
-  // boundary so we never emit a sub-precision result.
-  let candidate = new Date(
-    Math.ceil((fromUtc.getTime() + 1) / stepMs) * stepMs,
-  );
+  // One tick after `fromUtc`, rounded up to the field-precision boundary.
+  let candidate = new Date(Math.ceil((fromUtc.getTime() + 1) / stepMs) * stepMs);
 
   for (let iter = 0; iter < MAX_ITERATION_STEPS; iter++) {
     const wc = getWallClock(candidate, tz);
 
-    // Year (Quartz only)
-    if (expr.fields.year !== undefined) {
-      if (!matches(expr.fields.year, wc.year)) {
-        const ny = nextMatch(
-          expr.fields.year,
-          wc.year + 1,
-          QUARTZ_MIN_YEAR,
-          QUARTZ_MAX_YEAR,
-        );
-        if (ny === null) {
-          throw noMatchError(expr);
-        }
-        candidate = wallClockToUtc(
-          { year: ny, month: 1, day: 1, hour: 0, minute: 0, second: 0 },
-          tz,
-        );
-        continue;
-      }
-    }
-
-    // Month
-    if (!matches(expr.fields.month, wc.month)) {
-      const nm = nextMatch(expr.fields.month, wc.month + 1, 1, 12);
-      if (nm === null) {
-        candidate = wallClockToUtc(
-          { year: wc.year + 1, month: 1, day: 1, hour: 0, minute: 0, second: 0 },
-          tz,
-        );
-      } else {
-        candidate = wallClockToUtc(
-          { year: wc.year, month: nm, day: 1, hour: 0, minute: 0, second: 0 },
-          tz,
-        );
-      }
+    if (expr.fields.year !== undefined && !matches(expr.fields.year, wc.year)) {
+      const ny = nextMatch(expr.fields.year, wc.year + 1, QUARTZ_MIN_YEAR, QUARTZ_MAX_YEAR);
+      if (ny === null) throw noMatchError(expr);
+      candidate = wallClockToUtc(
+        { year: ny, month: 1, day: 1, hour: 0, minute: 0, second: 0 },
+        tz,
+      );
       continue;
     }
 
-    // Day (combined dom + dow + Quartz extras).
+    if (!matches(expr.fields.month, wc.month)) {
+      const nm = nextMatch(expr.fields.month, wc.month + 1, 1, 12);
+      candidate = wallClockToUtc(
+        nm === null
+          ? { year: wc.year + 1, month: 1, day: 1, hour: 0, minute: 0, second: 0 }
+          : { year: wc.year, month: nm, day: 1, hour: 0, minute: 0, second: 0 },
+        tz,
+      );
+      continue;
+    }
+
     if (!dayMatches(expr, wc)) {
       candidate = wallClockToUtc(
         { year: wc.year, month: wc.month, day: wc.day + 1, hour: 0, minute: 0, second: 0 },
@@ -161,55 +134,40 @@ function computeNext(expr: CronExpression, fromUtc: Date, tz: string): Date {
       continue;
     }
 
-    // Hour
     if (!matches(expr.fields.hour, wc.hour)) {
       const nh = nextMatch(expr.fields.hour, wc.hour + 1, 0, 23);
-      if (nh === null) {
-        candidate = advanceField(wc, 'day', tz);
-      } else {
-        candidate = wallClockToUtc(
-          { year: wc.year, month: wc.month, day: wc.day, hour: nh, minute: 0, second: 0 },
-          tz,
-        );
-      }
+      candidate = nh === null
+        ? advanceField(wc, 'day', tz)
+        : wallClockToUtc(
+            { year: wc.year, month: wc.month, day: wc.day, hour: nh, minute: 0, second: 0 },
+            tz,
+          );
       continue;
     }
 
-    // Minute
     if (!matches(expr.fields.minute, wc.minute)) {
       const nmin = nextMatch(expr.fields.minute, wc.minute + 1, 0, 59);
-      if (nmin === null) {
-        candidate = advanceField(wc, 'hour', tz);
-      } else {
-        candidate = wallClockToUtc(
-          { year: wc.year, month: wc.month, day: wc.day, hour: wc.hour, minute: nmin, second: 0 },
-          tz,
-        );
-      }
+      candidate = nmin === null
+        ? advanceField(wc, 'hour', tz)
+        : wallClockToUtc(
+            { year: wc.year, month: wc.month, day: wc.day, hour: wc.hour, minute: nmin, second: 0 },
+            tz,
+          );
       continue;
     }
 
-    // Seconds (Quartz only)
-    if (expr.fields.seconds !== undefined) {
-      if (!matches(expr.fields.seconds, wc.second)) {
-        const ns = nextMatch(expr.fields.seconds, wc.second + 1, 0, 59);
-        if (ns === null) {
-          candidate = advanceField(wc, 'minute', tz);
-        } else {
-          candidate = wallClockToUtc(
+    if (expr.fields.seconds !== undefined && !matches(expr.fields.seconds, wc.second)) {
+      const ns = nextMatch(expr.fields.seconds, wc.second + 1, 0, 59);
+      candidate = ns === null
+        ? advanceField(wc, 'minute', tz)
+        : wallClockToUtc(
             {
-              year: wc.year,
-              month: wc.month,
-              day: wc.day,
-              hour: wc.hour,
-              minute: wc.minute,
-              second: ns,
+              year: wc.year, month: wc.month, day: wc.day,
+              hour: wc.hour, minute: wc.minute, second: ns,
             },
             tz,
           );
-        }
-        continue;
-      }
+      continue;
     }
 
     return candidate;
@@ -218,7 +176,6 @@ function computeNext(expr: CronExpression, fromUtc: Date, tz: string): Date {
   throw noMatchError(expr);
 }
 
-/** Bump the named field by 1 and zero everything finer-grained. */
 function advanceField(wc: WallClock, field: 'day' | 'hour' | 'minute', tz: string): Date {
   switch (field) {
     case 'day':
@@ -228,25 +185,14 @@ function advanceField(wc: WallClock, field: 'day' | 'hour' | 'minute', tz: strin
       );
     case 'hour':
       return wallClockToUtc(
-        {
-          year: wc.year,
-          month: wc.month,
-          day: wc.day,
-          hour: wc.hour + 1,
-          minute: 0,
-          second: 0,
-        },
+        { year: wc.year, month: wc.month, day: wc.day, hour: wc.hour + 1, minute: 0, second: 0 },
         tz,
       );
     case 'minute':
       return wallClockToUtc(
         {
-          year: wc.year,
-          month: wc.month,
-          day: wc.day,
-          hour: wc.hour,
-          minute: wc.minute + 1,
-          second: 0,
+          year: wc.year, month: wc.month, day: wc.day,
+          hour: wc.hour, minute: wc.minute + 1, second: 0,
         },
         tz,
       );
@@ -261,4 +207,3 @@ function noMatchError(expr: CronExpression): ParseError {
     source: expr.source,
   });
 }
-

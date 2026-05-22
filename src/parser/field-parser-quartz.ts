@@ -14,30 +14,14 @@ const NL_PATTERN = /^(\d{1,2})L$/u;
 const NW_PATTERN = /^(\d{1,2})W$/u;
 const NHASH_PATTERN = /^(\d{1,2})#([1-5])$/u;
 
-/**
- * Try to recognise a Quartz-only field extension. Returns the parsed AST
- * (or an error result) when the lexeme matches one of:
- *
- *   - `?`        (Any)
- *   - `L`        (LastDom, offset 0)
- *   - `L-n`      (LastDom, offset n)
- *   - `<n>L`     (LastDow, weekday n)
- *   - `<n>W`     (WeekdayNearest, day n)
- *   - `<n>#<m>`  (NthDow, weekday n, nth m)
- *
- * Returns `null` if the lexeme does not match a Quartz extension -
- * the caller continues with standard-mode parsing (range, step, value).
- *
- * If the lexeme syntactically matches a Quartz extension but the dialect
- * is `standard`, returns an error result (do NOT silently fall through).
- */
+/** Recognise `?`, `L`, `L-n`, `nL`, `nW`, `n#m`. Returns `null` when the
+ *  lexeme does not match any Quartz extension. */
 export function parseQuartzExtension(
   lexeme: string,
   position: SourcePosition,
   meta: FieldMeta,
   dialect: ResolvedCronMode,
 ): Result | null {
-  // 1. Bare '?' - Any
   if (lexeme === '?') {
     const e = checkQuartzOnlyFeature('?', dialect, meta.name, position);
     if (e !== null) return failure(e);
@@ -53,7 +37,6 @@ export function parseQuartzExtension(
     return ok(deepFreeze({ kind: 'any' } as FieldAst));
   }
 
-  // 2. LastDom - `L` or `L-n`
   if (lexeme === 'L' || lexeme.startsWith('L-')) {
     const e = checkQuartzOnlyFeature('L', dialect, meta.name, position);
     if (e !== null) return failure(e);
@@ -92,7 +75,6 @@ export function parseQuartzExtension(
     return ok(deepFreeze({ kind: 'lastDom', offset } as FieldAst));
   }
 
-  // 3. LastDow - `<n>L`
   const nl = NL_PATTERN.exec(lexeme);
   if (nl !== null) {
     const e = checkQuartzOnlyFeature('L', dialect, meta.name, position);
@@ -112,7 +94,6 @@ export function parseQuartzExtension(
     return ok(deepFreeze({ kind: 'lastDow', weekday } as FieldAst));
   }
 
-  // 4. WeekdayNearest - `<n>W`
   const nw = NW_PATTERN.exec(lexeme);
   if (nw !== null) {
     const e = checkQuartzOnlyFeature('W', dialect, meta.name, position);
@@ -132,7 +113,6 @@ export function parseQuartzExtension(
     return ok(deepFreeze({ kind: 'weekdayNearest', day } as FieldAst));
   }
 
-  // 5. NthDow - `<n>#<m>`
   const nh = NHASH_PATTERN.exec(lexeme);
   if (nh !== null) {
     const e = checkQuartzOnlyFeature('#', dialect, meta.name, position);

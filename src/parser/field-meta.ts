@@ -1,13 +1,5 @@
 import type { FieldName, ResolvedCronMode } from '../ast/dialect.js';
 
-/**
- * Compile-time description of a single cron field - its name, numeric
- * range, allowed mnemonics, and the Quartz-only feature set it permits.
- *
- * One `FieldMeta` per (dialect, field) pair is exported from this module
- * via `getFieldMeta`. The field parser consults the meta when interpreting
- * lexemes; the validator consults the meta when checking ranges.
- */
 export interface FieldMeta {
   readonly name: FieldName;
   readonly min: number;
@@ -66,11 +58,6 @@ const QUARTZ_META: Readonly<Record<string, FieldMeta>> = Object.freeze({
   year: { name: 'year', min: 1970, max: 2199 },
 });
 
-/**
- * Return the metadata for one (dialect, field) pair. Returns `null` for
- * field/dialect combinations that do not exist (e.g. `'seconds'` in
- * standard mode).
- */
 export function getFieldMeta(
   dialect: ResolvedCronMode,
   field: FieldName,
@@ -79,10 +66,6 @@ export function getFieldMeta(
   return table[field] ?? null;
 }
 
-/**
- * Canonical ordering of fields for a given dialect - the order in which
- * raw tokens map to fields. Standard always has 5; Quartz has 6 or 7.
- */
 export function fieldOrderFor(
   dialect: ResolvedCronMode,
   tokenCount: number,

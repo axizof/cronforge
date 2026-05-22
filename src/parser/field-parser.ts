@@ -12,17 +12,6 @@ export type FieldParseResult =
   | { readonly ok: true; readonly ast: FieldAst }
   | { readonly ok: false; readonly errors: ReadonlyArray<ValidationError> };
 
-/**
- * Parse one whitespace-delimited field lexeme into a `FieldAst`.
- *
- * Handles all syntactic variants: wildcard (`*`), values, ranges, steps,
- * lists (`a,b,c`), mnemonic names (`JAN`, `MON`), and - when the
- * dialect is Quartz and the field meta permits - `?`, `L`, `L-n`, `nL`,
- * `nW`, `n#m`.
- *
- * Errors are accumulated, not thrown. The caller decides whether to
- * surface them via `ValidationResult` or to throw `ParseError`.
- */
 export function parseField(
   lexeme: string,
   position: SourcePosition,
@@ -38,11 +27,7 @@ export function parseField(
       suggestion: null,
     });
   }
-
-  if (lexeme.includes(',')) {
-    return parseList(lexeme, position, meta, dialect);
-  }
-
+  if (lexeme.includes(',')) return parseList(lexeme, position, meta, dialect);
   return parseSub(lexeme, position, meta, dialect);
 }
 
@@ -96,28 +81,19 @@ function parseSub(
   meta: FieldMeta,
   dialect: ResolvedCronMode,
 ): FieldParseResult {
-  // 1. Wildcard (with optional step).
   if (lexeme === '*') {
     return { ok: true, ast: deepFreeze({ kind: 'wildcard' } as FieldAst) };
   }
 
-  // 2. Step expressions: "<base>/<n>".
   const slashIdx = lexeme.indexOf('/');
-  if (slashIdx >= 0) {
-    return parseStep(lexeme, slashIdx, position, meta, dialect);
-  }
+  if (slashIdx >= 0) return parseStep(lexeme, slashIdx, position, meta, dialect);
 
-  // 3. Quartz-only extensions (`?`, `L`, `L-n`, `nL`, `nW`, `n#m`).
   const quartzResult = parseQuartzExtension(lexeme, position, meta, dialect);
   if (quartzResult !== null) return quartzResult;
 
-  // 4. Range expressions: "<from>-<to>".
   const dashIdx = findRangeDash(lexeme);
-  if (dashIdx > 0) {
-    return parseRange(lexeme, dashIdx, position, meta);
-  }
+  if (dashIdx > 0) return parseRange(lexeme, dashIdx, position, meta);
 
-  // 5. Single value (numeric or mnemonic).
   return parseValue(lexeme, position, meta);
 }
 
@@ -192,15 +168,13 @@ function parseRange(
   const toResolved = resolveLiteral(toStr, meta);
   const errors: ValidationError[] = [];
 
-  if (fromResolved === null) {
-    errors.push(literalError(fromStr, meta, position));
-  } else {
+  if (fromResolved === null) errors.push(literalError(fromStr, meta, position));
+  else {
     const e = checkValueInRange(fromResolved, meta, position);
     if (e !== null) errors.push(e);
   }
-  if (toResolved === null) {
-    errors.push(literalError(toStr, meta, position));
-  } else {
+  if (toResolved === null) errors.push(literalError(toStr, meta, position));
+  else {
     const e = checkValueInRange(toResolved, meta, position);
     if (e !== null) errors.push(e);
   }
@@ -224,9 +198,6 @@ function parseValue(
   position: SourcePosition,
   meta: FieldMeta,
 ): FieldParseResult {
-  // Reject obvious bare Quartz characters here (they should have been
-  // caught by parseQuartzExtension; reaching parseValue means standard
-  // mode or unsupported usage).
   if (lexeme === '?') {
     return failure(
       checkQuartzOnlyFeature('?', 'standard', meta.name, position) ?? {
@@ -245,12 +216,7 @@ function parseValue(
   return { ok: true, ast: deepFreeze({ kind: 'value', value: n } as FieldAst) };
 }
 
-// ---------------------------------------------------------------------------
-// shared helpers
-// ---------------------------------------------------------------------------
-
-/** Find the FIRST `-` that is not at position 0 (so `-3` reads as a single
- *  literal, used by Quartz `L-3`). Returns -1 when no range dash present. */
+/** First `-` past position 0, so `L-3` reads as one literal. -1 when absent. */
 function findRangeDash(lexeme: string): number {
   for (let i = 1; i < lexeme.length; i++) {
     if (lexeme.charAt(i) === '-') return i;
@@ -265,12 +231,9 @@ function parseIntStrict(s: string): number | null {
 }
 
 function resolveLiteral(lexeme: string, meta: FieldMeta): number | null {
-  if (/^\d+$/u.test(lexeme)) {
-    return Number.parseInt(lexeme, 10);
-  }
+  if (/^\d+$/u.test(lexeme)) return Number.parseInt(lexeme, 10);
   if (meta.mnemonics !== undefined) {
-    const up = lexeme.toUpperCase();
-    const m = meta.mnemonics[up];
+    const m = meta.mnemonics[lexeme.toUpperCase()];
     return m ?? null;
   }
   return null;
@@ -297,6 +260,3 @@ function literalError(
 function failure(err: ValidationError): FieldParseResult {
   return { ok: false, errors: Object.freeze([err]) };
 }
-
-// Re-export for the Quartz helper.
-export { resolveLiteral as resolveLiteralForQuartz, parseIntStrict as parseIntStrictForQuartz };

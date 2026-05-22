@@ -1,9 +1,7 @@
 import type { FieldName, SourcePosition } from '../ast/dialect.js';
 
-/**
- * One concrete issue identified by the validator or the parser. Stable
- * across versions: consumers may key UI translation off `code`.
- */
+/** One concrete issue from the parser or validator. `code` is stable
+ *  across versions — safe to use as an i18n key. */
 export interface ValidationError {
   readonly field: FieldName | null;
   readonly position: SourcePosition;
@@ -12,28 +10,22 @@ export interface ValidationError {
   readonly suggestion: string | null;
 }
 
-/**
- * Aggregate result returned by `validate()`. Always populated; `validate()`
- * NEVER throws (Constitution Principle III, FR-004).
- */
+/** Aggregate result returned by `validate()`. */
 export interface ValidationResult {
   readonly valid: boolean;
   readonly errors: ReadonlyArray<ValidationError>;
 }
 
 /**
- * Thrown by `parse()`. Returned (not thrown) by `tryParse()` and the safe
- * builder variants. A real `Error` subclass so existing `try/catch` and
- * `instanceof Error` checks work.
+ * Thrown by `parse()` and `build()`. Returned (not thrown) by `tryParse()`
+ * and `buildResult()`.
  *
  * @example
  * ```ts
  * try {
  *   parse('not a cron', { mode: 'standard' });
  * } catch (e) {
- *   if (e instanceof ParseError) {
- *     console.log(e.code, e.errors);
- *   }
+ *   if (e instanceof ParseError) console.log(e.code, e.errors);
  * }
  * ```
  */

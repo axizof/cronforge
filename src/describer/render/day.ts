@@ -4,65 +4,38 @@ import type { FieldAst, FieldSet } from '../../ast/nodes.js';
 import type { LocaleData } from '../locales/index.js';
 import type { ResolvedCronMode } from '../../ast/dialect.js';
 
-/**
- * Output of `renderDay`: either nothing (the day-clause is irrelevant -
- * for example when month is restricted but dom/dow are wildcards) or a
- * phrase plus a flag indicating whether the joiner should prepend a
- * comma.
- */
 export interface DayFragment {
   readonly phrase: string;
   readonly leadingComma: boolean;
 }
 
-/**
- * Render the day-related clause: weekday, day-of-month, last-day, nth-of,
- * etc.  Returns `null` to elide the clause entirely.
- */
 export function renderDay(
   fields: FieldSet,
   dialect: ResolvedCronMode,
   monthIsWildcard: boolean,
   locale: LocaleData,
 ): DayFragment | null {
-  const dom = fields.dom;
-  const dow = fields.dow;
-
-  // -------------------------------------------------------------------
-  // Catch-all: both dom and dow are "everything" -> render "every day"
-  // only when the month is unrestricted; otherwise let the month clause
-  // carry the meaning ("Every minute, June through August").
-  // -------------------------------------------------------------------
+  const { dom, dow } = fields;
   const domIsEvery = dom.kind === 'wildcard' || dom.kind === 'any';
   const dowIsEvery = dow.kind === 'wildcard' || dow.kind === 'any';
+
   if (domIsEvery && dowIsEvery) {
     if (!monthIsWildcard) return null;
+    // Standard: ", every day". Quartz uses "?" semantics → no comma.
     return {
       phrase: locale.atoms['every_day']!,
-      // Quartz uses "?" semantics - match the spec example exactly:
-      //   "At 12:00 PM every day" (no comma)
-      // Standard cron joins with a comma:
-      //   "At 11:00 AM, every day"
       leadingComma: dialect === 'standard',
     };
   }
 
-  // -------------------------------------------------------------------
-  // Concrete dow first (more user-friendly than dom in most cases).
-  // -------------------------------------------------------------------
   if (!dowIsEvery) {
     const dowPhrase = renderDowNode(dow, dialect, locale);
     if (dowPhrase !== null) return { phrase: dowPhrase, leadingComma: true };
   }
-
-  // -------------------------------------------------------------------
-  // Otherwise render dom.
-  // -------------------------------------------------------------------
   if (!domIsEvery) {
     const domPhrase = renderDomNode(dom, locale);
     if (domPhrase !== null) return { phrase: domPhrase, leadingComma: true };
   }
-
   return null;
 }
 
@@ -85,9 +58,7 @@ function renderDowNode(
       const names = node.members.map((m) =>
         m.kind === 'value' ? weekdayName(m.value, dialect, locale) : '?',
       );
-      return interpolate(locale.atoms['on_weekdays']!, {
-        weekdays: joinList(names),
-      });
+      return interpolate(locale.atoms['on_weekdays']!, { weekdays: joinList(names) });
     }
     case 'lastDow':
       return interpolate(locale.atoms['last_weekday_of_month']!, {
@@ -114,9 +85,7 @@ function renderDomNode(node: FieldAst, locale: LocaleData): string | null {
       const days = node.members
         .filter((m): m is { readonly kind: 'value'; readonly value: number } => m.kind === 'value')
         .map((m) => `${m.value}${ordinalSuffix(m.value, locale)}`);
-      return interpolate(locale.atoms['on_days_of_month']!, {
-        days: joinList(days),
-      });
+      return interpolate(locale.atoms['on_days_of_month']!, { days: joinList(days) });
     }
     case 'lastDom':
       if (node.offset === 0) return locale.atoms['last_day_of_month']!;
@@ -134,11 +103,7 @@ function renderDomNode(node: FieldAst, locale: LocaleData): string | null {
   }
 }
 
-/**
- * Convert a dialect-numbered weekday (`SUN=0..SAT=6` for standard,
- * `SUN=1..SAT=7` for Quartz) into the locale weekday name. Locale
- * `weekdays` keys use standard numbering (FR-013 design).
- */
+/** Translate dialect-encoded weekday → standard SUN=0 numbering for locale lookup. */
 function weekdayName(n: number, dialect: ResolvedCronMode, locale: LocaleData): string {
   const stdN = dialect === 'standard' ? n : ((n - 1) % 7 + 7) % 7;
   return locale.weekdays[String(stdN)] ?? String(n);

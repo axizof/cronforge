@@ -2,13 +2,6 @@ import type { FieldMeta } from '../../parser/field-meta.js';
 import type { SourcePosition } from '../../ast/dialect.js';
 import type { ValidationError } from '../../parser/errors.js';
 
-/**
- * Validate that a numeric value lies inside the field's declared range.
- * Returns `null` on success, a `ValidationError` on failure.
- *
- * Called by the field parser at every literal-value site (single value,
- * range endpoint, mnemonic resolution).
- */
 export function checkValueInRange(
   value: number,
   meta: FieldMeta,
@@ -26,9 +19,6 @@ export function checkValueInRange(
   return null;
 }
 
-/**
- * Validate that `from <= to` after numeric resolution.
- */
 export function checkRangeBounds(
   from: number,
   to: number,
