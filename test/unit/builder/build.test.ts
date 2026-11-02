@@ -1,245 +1,98 @@
 import { describe, it, expect } from 'vitest';
 import { build, buildResult } from '../../../src/builder/build.js';
-import { parse } from '../../../src/parser/parse.js';
+import type { CronBuilderInput } from '../../../src/builder/input.js';
+import { CronError } from '../../../src/parser/errors.js';
+import { validate } from '../../../src/validator/validate.js';
 
-describe('build() - per variant', () => {
-  it('everyN minute -> */5 * * * *', () => {
-    expect(build({ kind: 'everyN', unit: 'minute', n: 5 }, { mode: 'standard' })).toBe(
-      '*/5 * * * *',
-    );
-  });
+const at9 = { hour: 9, minute: 0 };
 
-  it('everyN hour -> 0 */2 * * *', () => {
-    expect(build({ kind: 'everyN', unit: 'hour', n: 2 }, { mode: 'standard' })).toBe(
-      '0 */2 * * *',
-    );
-  });
-
-  it('everyN day -> 0 0 */3 * *', () => {
-    expect(build({ kind: 'everyN', unit: 'day', n: 3 }, { mode: 'standard' })).toBe(
-      '0 0 */3 * *',
-    );
-  });
-
-  it('at single time -> 30 14 * * *', () => {
-    expect(
-      build({ kind: 'at', times: [{ hour: 14, minute: 30 }] }, { mode: 'standard' }),
-    ).toBe('30 14 * * *');
-  });
-
-  it('at multiple times -> 0,30 8,12,18 * * *', () => {
-    expect(
-      build(
-        {
-          kind: 'at',
-          times: [
-            { hour: 8, minute: 0 },
-            { hour: 12, minute: 30 },
-            { hour: 18, minute: 0 },
-          ],
-        },
-        { mode: 'standard' },
-      ),
-    ).toBe('0,30,0 8,12,18 * * *');
-  });
-
-  it('daysOfWeek MON,WED,FRI at 09:00 -> 0 9 * * 1,3,5', () => {
-    expect(
-      build(
-        { kind: 'daysOfWeek', days: ['MON', 'WED', 'FRI'], at: { hour: 9, minute: 0 } },
-        { mode: 'standard' },
-      ),
-    ).toBe('0 9 * * 1,3,5');
-  });
-
-  it('daysOfMonth [1, 15] at 12:00 -> 0 12 1,15 * *', () => {
-    expect(
-      build(
-        { kind: 'daysOfMonth', days: [1, 15], at: { hour: 12, minute: 0 } },
-        { mode: 'standard' },
-      ),
-    ).toBe('0 12 1,15 * *');
-  });
-
-  it('hourRange 9-17 -> 0 9-17 * * *', () => {
-    expect(
-      build({ kind: 'hourRange', from: 9, to: 17 }, { mode: 'standard' }),
-    ).toBe('0 9-17 * * *');
-  });
-
-  it('monthRange JUN-AUG -> * * * 6-8 *', () => {
-    expect(
-      build({ kind: 'monthRange', from: 'JUN', to: 'AUG' }, { mode: 'standard' }),
-    ).toBe('* * * 6-8 *');
-  });
-
-  it('nthWeekdayOfMonth (Quartz) -> 0 0 14 ? * 4#3', () => {
-    // 3rd Wednesday at 14:00. Quartz dow WED = 4.
-    expect(
-      build(
-        {
-          kind: 'nthWeekdayOfMonth',
-          nth: 3,
-          weekday: 'WED',
-          at: { hour: 14, minute: 0 },
-        },
-        { mode: 'quartz' },
-      ),
-    ).toBe('0 0 14 ? * 4#3');
-  });
-
-  it('lastDayOfMonth at 23:59 (Quartz) -> 0 59 23 L * ?', () => {
-    expect(
-      build(
-        { kind: 'lastDayOfMonth', at: { hour: 23, minute: 59 } },
-        { mode: 'quartz' },
-      ),
-    ).toBe('0 59 23 L * ?');
-  });
-
-  it('lastWeekdayOfMonth FRI at 17:00 (Quartz) -> 0 0 17 ? * 6L', () => {
-    expect(
-      build(
-        {
-          kind: 'lastWeekdayOfMonth',
-          weekday: 'FRI',
-          at: { hour: 17, minute: 0 },
-        },
-        { mode: 'quartz' },
-      ),
-    ).toBe('0 0 17 ? * 6L');
-  });
-
-  it('weekdayNearestTo 15 at 12:00 (Quartz) -> 0 0 12 15W * ?', () => {
-    expect(
-      build(
-        { kind: 'weekdayNearestTo', day: 15, at: { hour: 12, minute: 0 } },
-        { mode: 'quartz' },
-      ),
-    ).toBe('0 0 12 15W * ?');
-  });
-
-  it('composite combines parts', () => {
-    const result = build(
+describe('build() - standard mode', () => {
+  it.each<[CronBuilderInput, string]>([
+    [{ kind: 'everyN', unit: 'minute', n: 5 }, '*/5 * * * *'],
+    [{ kind: 'everyN', unit: 'hour', n: 2 }, '0 */2 * * *'],
+    [{ kind: 'everyN', unit: 'day', n: 3 }, '0 0 */3 * *'],
+    [{ kind: 'everyN', unit: 'month', n: 6 }, '0 0 1 */6 *'],
+    [{ kind: 'everyN', unit: 'year', n: 1 }, '0 0 1 1 *'],
+    [{ kind: 'at', times: [{ hour: 14, minute: 30 }] }, '30 14 * * *'],
+    [{ kind: 'at', times: [{ hour: 17, minute: 0 }, at9] }, '0 9,17 * * *'],
+    [
       {
-        kind: 'composite',
-        parts: [
-          { kind: 'at', times: [{ hour: 8, minute: 0 }] },
-          { kind: 'at', times: [{ hour: 18, minute: 0 }] },
-        ],
+        kind: 'at',
+        times: [at9, { hour: 9, minute: 30 }, { hour: 17, minute: 0 }, { hour: 17, minute: 30 }],
       },
-      { mode: 'standard' },
-    );
-    // Both parts -> minutes: list(0) = single 0; hours: list(8,18)
-    expect(result).toBe('0 8,18 * * *');
+      '0,30 9,17 * * *',
+    ],
+    [{ kind: 'daysOfWeek', days: ['MON', 'WED', 'FRI'], at: at9 }, '0 9 * * 1,3,5'],
+    [{ kind: 'daysOfWeek', days: [5, 'MON', 1], at: at9 }, '0 9 * * 1,5'],
+    [{ kind: 'daysOfMonth', days: [15, 1], at: { hour: 12, minute: 0 } }, '0 12 1,15 * *'],
+    [{ kind: 'hourRange', from: 9, to: 17 }, '0 9-17 * * *'],
+    [{ kind: 'hourRange', from: 9, to: 17, minute: 30 }, '30 9-17 * * *'],
+    [{ kind: 'monthRange', from: 'JUN', to: 'AUG' }, '* * * 6-8 *'],
+    [{ kind: 'monthRange', from: 6, to: 8, at: at9 }, '0 9 * 6-8 *'],
+  ])('%j -> %s', (input, expected) => {
+    expect(build(input, { mode: 'standard' })).toBe(expected);
   });
 });
 
-describe('build() - error paths', () => {
-  function expectBuildErrorCode(
-    fn: () => unknown,
-    expectedCode: string,
-  ): void {
-    try {
-      fn();
-      throw new Error('expected build() to throw');
-    } catch (e) {
-      // build() throws a ParseError wrapping a BuildError.
-      const code = (e as { code?: string }).code;
-      expect(code).toBe(expectedCode);
-    }
-  }
-
-  it('throws on Quartz-only variant in standard mode', () => {
-    expectBuildErrorCode(
-      () => build({ kind: 'lastDayOfMonth', at: { hour: 0, minute: 0 } }, { mode: 'standard' }),
-      'mode-incompatibility',
-    );
-  });
-
-  it('throws on empty list', () => {
-    expectBuildErrorCode(
-      () => build({ kind: 'at', times: [] }, { mode: 'standard' }),
-      'empty-list',
-    );
-  });
-
-  it('throws on out-of-range time', () => {
-    expectBuildErrorCode(
-      () => build({ kind: 'at', times: [{ hour: 25, minute: 0 }] }, { mode: 'standard' }),
-      'out-of-range',
-    );
-  });
-
-  it('throws on empty composite', () => {
-    expectBuildErrorCode(
-      () => build({ kind: 'composite', parts: [] }, { mode: 'standard' }),
-      'composite-empty',
-    );
-  });
-
-  it('seconds in standard mode rejected', () => {
-    expectBuildErrorCode(
-      () =>
-        build(
-          { kind: 'at', times: [{ hour: 12, minute: 0, second: 30 }] },
-          { mode: 'standard' },
-        ),
-      'mode-incompatibility',
-    );
-  });
-});
-
-describe('buildResult() - never throws', () => {
-  it('returns ok for a valid input', () => {
-    const r = buildResult({ kind: 'everyN', unit: 'minute', n: 10 }, { mode: 'standard' });
-    expect(r.ok).toBe(true);
-    if (!r.ok) throw new Error('unreachable');
-    expect(r.value).toBe('*/10 * * * *');
-  });
-
-  it('returns err with mode-incompatibility', () => {
-    const r = buildResult(
-      { kind: 'lastDayOfMonth', at: { hour: 0, minute: 0 } },
-      { mode: 'standard' },
-    );
-    expect(r.ok).toBe(false);
-    if (r.ok) throw new Error('unreachable');
-    expect(r.error.code).toBe('mode-incompatibility');
-  });
-});
-
-describe('build() round-trip property', () => {
-  const cases = [
-    [{ kind: 'everyN', unit: 'minute', n: 5 } as const, 'standard'] as const,
+describe('build() - quartz mode', () => {
+  it.each<[CronBuilderInput, string]>([
+    [{ kind: 'everyN', unit: 'minute', n: 5 }, '0 */5 * * * ?'],
+    [{ kind: 'everyN', unit: 'hour', n: 2 }, '0 0 */2 * * ?'],
+    [{ kind: 'everyN', unit: 'day', n: 3 }, '0 0 0 */3 * ?'],
+    [{ kind: 'everyN', unit: 'year', n: 2 }, '0 0 0 1 1 ? */2'],
+    [{ kind: 'at', times: [{ hour: 14, minute: 30, second: 15 }] }, '15 30 14 * * ?'],
+    [{ kind: 'daysOfWeek', days: ['MON', 'FRI'], at: at9 }, '0 0 9 ? * 2,6'],
+    [{ kind: 'daysOfWeek', days: [0], at: at9 }, '0 0 9 ? * 1'],
+    [{ kind: 'hourRange', from: 9, to: 17 }, '0 0 9-17 * * ?'],
+    [{ kind: 'monthRange', from: 'JUN', to: 'AUG' }, '0 * * * 6-8 ?'],
     [
-      { kind: 'at', times: [{ hour: 9, minute: 0 }, { hour: 17, minute: 0 }] } as const,
+      { kind: 'nthWeekdayOfMonth', nth: 3, weekday: 'WED', at: { hour: 14, minute: 0 } },
+      '0 0 14 ? * 4#3',
+    ],
+    [{ kind: 'lastDayOfMonth', at: { hour: 23, minute: 59 } }, '0 59 23 L * ?'],
+    [{ kind: 'lastWeekdayOfMonth', weekday: 'FRI', at: { hour: 17, minute: 0 } }, '0 0 17 ? * 6L'],
+    [{ kind: 'weekdayNearestTo', day: 15, at: { hour: 12, minute: 0 } }, '0 0 12 15W * ?'],
+  ])('%j -> %s', (input, expected) => {
+    const expression = build(input, { mode: 'quartz' });
+    expect(expression).toBe(expected);
+    expect(validate(expression, { mode: 'quartz' }).valid).toBe(true);
+  });
+});
+
+describe('buildResult() - invalid input', () => {
+  it.each<[CronBuilderInput, 'standard' | 'quartz', string]>([
+    [{ kind: 'lastDayOfMonth', at: at9 }, 'standard', 'mode-incompatibility'],
+    [{ kind: 'everyN', unit: 'year', n: 2 }, 'standard', 'mode-incompatibility'],
+    [
+      { kind: 'at', times: [{ hour: 12, minute: 0, second: 30 }] },
       'standard',
-    ] as const,
-    [
-      { kind: 'daysOfWeek', days: ['MON', 'WED', 'FRI'], at: { hour: 9, minute: 0 } } as const,
-      'standard',
-    ] as const,
-    [
-      { kind: 'lastDayOfMonth', at: { hour: 23, minute: 59 } } as const,
-      'quartz',
-    ] as const,
-    [
-      {
-        kind: 'nthWeekdayOfMonth',
-        nth: 3,
-        weekday: 'WED',
-        at: { hour: 14, minute: 0 },
-      } as const,
-      'quartz',
-    ] as const,
-  ];
+      'mode-incompatibility',
+    ],
+    [{ kind: 'at', times: [at9, { hour: 17, minute: 30 }] }, 'standard', 'times-not-expressible'],
+    [{ kind: 'at', times: [] }, 'standard', 'empty-list'],
+    [{ kind: 'daysOfWeek', days: [], at: at9 }, 'standard', 'empty-list'],
+    [{ kind: 'at', times: [{ hour: 25, minute: 0 }] }, 'standard', 'out-of-range'],
+    [{ kind: 'everyN', unit: 'minute', n: 0 }, 'standard', 'out-of-range'],
+    [{ kind: 'everyN', unit: 'month', n: 13 }, 'standard', 'out-of-range'],
+    [{ kind: 'daysOfMonth', days: [32], at: at9 }, 'standard', 'out-of-range'],
+    [{ kind: 'hourRange', from: 17, to: 9 }, 'standard', 'out-of-range'],
+    [{ kind: 'hourRange', from: 9, to: 17, minute: 1.5 }, 'standard', 'out-of-range'],
+    [{ kind: 'monthRange', from: 'AUG', to: 'JUN' }, 'standard', 'out-of-range'],
+    [{ kind: 'daysOfWeek', days: [7 as 0], at: at9 }, 'quartz', 'out-of-range'],
+    [{ kind: 'composite' } as unknown as CronBuilderInput, 'standard', 'unknown-kind'],
+  ])('%j (%s) -> %s', (input, mode, code) => {
+    const r = buildResult(input, { mode });
+    expect(r.ok ? null : r.error.code).toBe(code);
+  });
 
-  for (const [input, mode] of cases) {
-    it(`${input.kind} (${mode}) round-trips through parse`, () => {
-      const s = build(input, { mode });
-      // Will throw if parse fails.
-      expect(() => parse(s, { mode })).not.toThrow();
-    });
-  }
+  it('rejects an unknown mode', () => {
+    const r = buildResult({ kind: 'everyN', unit: 'minute', n: 5 }, { mode: 'auto' as 'standard' });
+    expect(r.ok ? null : r.error.code).toBe('invalid-mode');
+  });
+
+  it('build() throws the same code as a CronError', () => {
+    const run = (): string => build({ kind: 'at', times: [] }, { mode: 'standard' });
+    expect(run).toThrow(CronError);
+    expect(run).toThrow(expect.objectContaining({ code: 'empty-list' }));
+  });
 });

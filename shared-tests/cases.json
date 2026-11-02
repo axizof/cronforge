@@ -8,18 +8,14 @@
       "valid": true,
       "dialect": "standard",
       "descriptors": {
-        "en": "Every minute, every day",
-        "fr": "Toutes les minutes, tous les jours"
+        "en": "Every minute",
+        "fr": "Toutes les minutes"
       },
       "nextOccurrences": {
         "from": "2026-06-01T10:00:00Z",
         "count": 3,
         "timezone": "UTC",
-        "expected": [
-          "2026-06-01T10:01:00Z",
-          "2026-06-01T10:02:00Z",
-          "2026-06-01T10:03:00Z"
-        ]
+        "expected": ["2026-06-01T10:01:00Z", "2026-06-01T10:02:00Z", "2026-06-01T10:03:00Z"]
       }
     },
     {
@@ -29,18 +25,14 @@
       "valid": true,
       "dialect": "standard",
       "descriptors": {
-        "en": "Every 5 minutes, every day",
-        "fr": "Toutes les 5 minutes, tous les jours"
+        "en": "Every 5 minutes",
+        "fr": "Toutes les 5 minutes"
       },
       "nextOccurrences": {
         "from": "2026-06-01T10:00:00Z",
         "count": 3,
         "timezone": "UTC",
-        "expected": [
-          "2026-06-01T10:05:00Z",
-          "2026-06-01T10:10:00Z",
-          "2026-06-01T10:15:00Z"
-        ]
+        "expected": ["2026-06-01T10:05:00Z", "2026-06-01T10:10:00Z", "2026-06-01T10:15:00Z"]
       }
     },
     {
@@ -50,8 +42,8 @@
       "valid": true,
       "dialect": "standard",
       "descriptors": {
-        "en": "Every hour, every day",
-        "fr": "Toutes les heures, tous les jours"
+        "en": "Every hour",
+        "fr": "Toutes les heures"
       },
       "nextOccurrences": {
         "from": "2026-06-01T10:00:00Z",
@@ -94,11 +86,7 @@
         "from": "2026-06-01T10:00:00Z",
         "count": 3,
         "timezone": "UTC",
-        "expected": [
-          "2026-06-01T10:15:00Z",
-          "2026-06-01T10:30:00Z",
-          "2026-06-01T10:45:00Z"
-        ]
+        "expected": ["2026-06-01T10:15:00Z", "2026-06-01T10:30:00Z", "2026-06-01T10:45:00Z"]
       }
     },
     {
@@ -156,7 +144,6 @@
       },
       "notes": "Feb 29 - leap years only."
     },
-
     {
       "id": "mac-001",
       "expression": "@hourly",
@@ -217,7 +204,6 @@
       "valid": true,
       "dialect": "standard"
     },
-
     {
       "id": "qtz-001",
       "expression": "0 0 12 ? * MON",
@@ -378,7 +364,6 @@
       "valid": true,
       "dialect": "quartz"
     },
-
     {
       "id": "auto-001",
       "expression": "* * * 6-8 *",
@@ -414,7 +399,6 @@
       "valid": true,
       "dialect": "standard"
     },
-
     {
       "id": "dst-001",
       "expression": "30 2 * * *",
@@ -453,11 +437,7 @@
         "from": "2026-03-28T11:00:00Z",
         "count": 3,
         "timezone": "Europe/Paris",
-        "expected": [
-          "2026-03-29T10:00:00Z",
-          "2026-03-30T10:00:00Z",
-          "2026-03-31T10:00:00Z"
-        ]
+        "expected": ["2026-03-29T10:00:00Z", "2026-03-30T10:00:00Z", "2026-03-31T10:00:00Z"]
       }
     },
     {
@@ -488,27 +468,47 @@
       },
       "notes": "12:00 EST (UTC-5) = 17:00 UTC."
     },
-
     {
       "id": "bad-001",
       "expression": "",
       "mode": "standard",
       "valid": false,
-      "validation": { "errors": [{ "code": "empty-input", "field": "whole" }] }
+      "validation": {
+        "errors": [
+          {
+            "code": "empty-input",
+            "field": "whole"
+          }
+        ]
+      }
     },
     {
       "id": "bad-002",
       "expression": "@foo",
       "mode": "standard",
       "valid": false,
-      "validation": { "errors": [{ "code": "unknown-macro", "field": "whole" }] }
+      "validation": {
+        "errors": [
+          {
+            "code": "unknown-macro",
+            "field": "whole"
+          }
+        ]
+      }
     },
     {
       "id": "bad-003",
       "expression": "99 * * * *",
       "mode": "standard",
       "valid": false,
-      "validation": { "errors": [{ "code": "value-out-of-range", "field": "minute" }] }
+      "validation": {
+        "errors": [
+          {
+            "code": "value-out-of-range",
+            "field": "minute"
+          }
+        ]
+      }
     },
     {
       "id": "bad-004",
@@ -516,7 +516,12 @@
       "mode": "quartz",
       "valid": false,
       "validation": {
-        "errors": [{ "code": "quartz-dom-dow-conflict", "field": "whole" }]
+        "errors": [
+          {
+            "code": "quartz-dom-dow-conflict",
+            "field": "whole"
+          }
+        ]
       }
     },
     {
@@ -525,7 +530,12 @@
       "mode": "standard",
       "valid": false,
       "validation": {
-        "errors": [{ "code": "field-count-standard", "field": "whole" }]
+        "errors": [
+          {
+            "code": "field-count-standard",
+            "field": "whole"
+          }
+        ]
       }
     },
     {
@@ -533,21 +543,280 @@
       "expression": "*/0 * * * *",
       "mode": "standard",
       "valid": false,
-      "validation": { "errors": [{ "code": "step-not-positive", "field": "minute" }] }
+      "validation": {
+        "errors": [
+          {
+            "code": "step-not-positive",
+            "field": "minute"
+          }
+        ]
+      }
     },
     {
       "id": "bad-007",
       "expression": "30-10 * * * *",
       "mode": "standard",
       "valid": false,
-      "validation": { "errors": [{ "code": "range-inverted", "field": "minute" }] }
+      "validation": {
+        "errors": [
+          {
+            "code": "range-inverted",
+            "field": "minute"
+          }
+        ]
+      }
     },
     {
       "id": "bad-008",
       "expression": "5/2 * * * *",
       "mode": "standard",
       "valid": false,
-      "validation": { "errors": [{ "code": "step-base-invalid", "field": "minute" }] }
+      "validation": {
+        "errors": [
+          {
+            "code": "step-base-invalid",
+            "field": "minute"
+          }
+        ]
+      }
+    },
+    {
+      "id": "std-020",
+      "expression": "5 * * * *",
+      "mode": "standard",
+      "valid": true,
+      "dialect": "standard",
+      "descriptors": {
+        "en": "At minute 5, every hour",
+        "fr": "À la minute 5, toutes les heures"
+      },
+      "nextOccurrences": {
+        "from": "2026-06-01T10:00:00Z",
+        "count": 2,
+        "timezone": "UTC",
+        "expected": ["2026-06-01T10:05:00Z", "2026-06-01T11:05:00Z"]
+      }
+    },
+    {
+      "id": "std-021",
+      "expression": "0 9-17 * * 1-5",
+      "mode": "standard",
+      "valid": true,
+      "dialect": "standard",
+      "descriptors": {
+        "en": "Every hour, between 9:00 AM and 5:59 PM, from Monday through Friday",
+        "fr": "Toutes les heures, entre 09h00 et 17h59, du lundi au vendredi"
+      },
+      "nextOccurrences": {
+        "from": "2026-06-05T17:00:00Z",
+        "count": 2,
+        "timezone": "UTC",
+        "expected": ["2026-06-08T09:00:00Z", "2026-06-08T10:00:00Z"]
+      },
+      "notes": "2026-06-05 is a Friday: after 17:00 the next run is Monday 09:00."
+    },
+    {
+      "id": "std-022",
+      "expression": "0 0 */2 * *",
+      "mode": "standard",
+      "valid": true,
+      "dialect": "standard",
+      "descriptors": {
+        "en": "At 12:00 AM, every 2 days",
+        "fr": "À 00h00, tous les 2 jours"
+      },
+      "nextOccurrences": {
+        "from": "2026-01-30T12:00:00Z",
+        "count": 3,
+        "timezone": "UTC",
+        "expected": ["2026-01-31T00:00:00Z", "2026-02-01T00:00:00Z", "2026-02-03T00:00:00Z"]
+      },
+      "notes": "*/2 on day-of-month starts at day 1 (1, 3, 5…) and restarts every month."
+    },
+    {
+      "id": "std-023",
+      "expression": "0 0 1 */3 *",
+      "mode": "standard",
+      "valid": true,
+      "dialect": "standard",
+      "nextOccurrences": {
+        "from": "2026-01-15T00:00:00Z",
+        "count": 3,
+        "timezone": "UTC",
+        "expected": ["2026-04-01T00:00:00Z", "2026-07-01T00:00:00Z", "2026-10-01T00:00:00Z"]
+      },
+      "notes": "*/3 on month starts at January: 1, 4, 7, 10."
+    },
+    {
+      "id": "std-024",
+      "expression": "0 0 1 * MON",
+      "mode": "standard",
+      "valid": true,
+      "dialect": "standard",
+      "descriptors": {
+        "en": "At 12:00 AM, on the 1st of the month or on Monday",
+        "fr": "À 00h00, le 1er du mois ou le lundi"
+      },
+      "nextOccurrences": {
+        "from": "2026-06-27T00:00:00Z",
+        "count": 3,
+        "timezone": "UTC",
+        "expected": ["2026-06-29T00:00:00Z", "2026-07-01T00:00:00Z", "2026-07-06T00:00:00Z"]
+      },
+      "notes": "Both day fields restricted: a day matching either one fires (Vixie cron)."
+    },
+    {
+      "id": "std-025",
+      "expression": "0 0 */2 * MON",
+      "mode": "standard",
+      "valid": true,
+      "dialect": "standard",
+      "nextOccurrences": {
+        "from": "2026-06-01T00:00:00Z",
+        "count": 3,
+        "timezone": "UTC",
+        "expected": ["2026-06-15T00:00:00Z", "2026-06-29T00:00:00Z", "2026-07-13T00:00:00Z"]
+      },
+      "notes": "A day field starting with * makes both fields required (Vixie cron): odd days that are Mondays."
+    },
+    {
+      "id": "std-026",
+      "expression": "0 0 * * 7",
+      "mode": "standard",
+      "valid": true,
+      "dialect": "standard",
+      "nextOccurrences": {
+        "from": "2026-06-01T00:00:00Z",
+        "count": 2,
+        "timezone": "UTC",
+        "expected": ["2026-06-07T00:00:00Z", "2026-06-14T00:00:00Z"]
+      },
+      "notes": "7 is accepted as Sunday, like Vixie cron and cronie."
+    },
+    {
+      "id": "qtz-020",
+      "expression": "0 0/15 * * * ?",
+      "mode": "quartz",
+      "valid": true,
+      "dialect": "quartz",
+      "descriptors": {
+        "en": "Every 15 minutes",
+        "fr": "Toutes les 15 minutes"
+      },
+      "nextOccurrences": {
+        "from": "2026-06-01T10:00:00Z",
+        "count": 3,
+        "timezone": "UTC",
+        "expected": ["2026-06-01T10:15:00Z", "2026-06-01T10:30:00Z", "2026-06-01T10:45:00Z"]
+      }
+    },
+    {
+      "id": "qtz-021",
+      "expression": "0 5/20 * * * ?",
+      "mode": "quartz",
+      "valid": true,
+      "dialect": "quartz",
+      "nextOccurrences": {
+        "from": "2026-06-01T10:00:00Z",
+        "count": 3,
+        "timezone": "UTC",
+        "expected": ["2026-06-01T10:05:00Z", "2026-06-01T10:25:00Z", "2026-06-01T10:45:00Z"]
+      },
+      "notes": "Quartz V/N runs from V to the end of the field: minutes 5, 25, 45."
+    },
+    {
+      "id": "qtz-022",
+      "expression": "0 0 12 LW * ?",
+      "mode": "quartz",
+      "valid": true,
+      "dialect": "quartz",
+      "descriptors": {
+        "en": "At 12:00 PM, on the last weekday of the month",
+        "fr": "À 12h00, le dernier jour ouvré du mois"
+      },
+      "nextOccurrences": {
+        "from": "2026-01-01T00:00:00Z",
+        "count": 3,
+        "timezone": "UTC",
+        "expected": ["2026-01-30T12:00:00Z", "2026-02-27T12:00:00Z", "2026-03-31T12:00:00Z"]
+      },
+      "notes": "Jan 31 and Feb 28 2026 are Saturdays, so the Fridays before them."
+    },
+    {
+      "id": "qtz-023",
+      "expression": "0 0 12 ? * L",
+      "mode": "quartz",
+      "valid": true,
+      "dialect": "quartz",
+      "nextOccurrences": {
+        "from": "2026-06-01T00:00:00Z",
+        "count": 2,
+        "timezone": "UTC",
+        "expected": ["2026-06-06T12:00:00Z", "2026-06-13T12:00:00Z"]
+      },
+      "notes": "A bare L in day-of-week means Saturday."
+    },
+    {
+      "id": "qtz-024",
+      "expression": "0 0 0 ? * */2",
+      "mode": "quartz",
+      "valid": true,
+      "dialect": "quartz",
+      "nextOccurrences": {
+        "from": "2026-06-01T00:00:00Z",
+        "count": 4,
+        "timezone": "UTC",
+        "expected": [
+          "2026-06-02T00:00:00Z",
+          "2026-06-04T00:00:00Z",
+          "2026-06-06T00:00:00Z",
+          "2026-06-07T00:00:00Z"
+        ]
+      },
+      "notes": "Quartz day-of-week starts at SUN = 1, so */2 is SUN, TUE, THU, SAT."
+    },
+    {
+      "id": "dst-006",
+      "expression": "30 2 * * *",
+      "mode": "standard",
+      "valid": true,
+      "dialect": "standard",
+      "nextOccurrences": {
+        "from": "2026-03-07T12:00:00Z",
+        "count": 2,
+        "timezone": "America/New_York",
+        "expected": ["2026-03-09T06:30:00Z", "2026-03-10T06:30:00Z"]
+      },
+      "notes": "02:30 does not exist on 2026-03-08 in New York: that day is skipped."
+    },
+    {
+      "id": "dst-007",
+      "expression": "45 * * * *",
+      "mode": "standard",
+      "valid": true,
+      "dialect": "standard",
+      "nextOccurrences": {
+        "from": "2026-11-01T06:30:00Z",
+        "count": 2,
+        "timezone": "America/New_York",
+        "expected": ["2026-11-01T06:45:00Z", "2026-11-01T07:45:00Z"]
+      },
+      "notes": "Starting inside the repeated 01:00 hour (01:30 EST): results never precede startFrom."
+    },
+    {
+      "id": "bad-009",
+      "expression": "5/15 * * * *",
+      "mode": "standard",
+      "valid": false,
+      "validation": {
+        "errors": [
+          {
+            "code": "step-base-invalid",
+            "field": "minute"
+          }
+        ]
+      },
+      "notes": "V/N is Quartz syntax; standard cron requires */N or a-b/N."
     }
   ]
 }

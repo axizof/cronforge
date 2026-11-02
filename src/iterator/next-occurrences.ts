@@ -1,31 +1,40 @@
 import { parse } from '../parser/parse.js';
-import { ParseError } from '../parser/errors.js';
+import { CronError } from '../parser/errors.js';
+import { QUARTZ_META, STANDARD_META } from '../parser/field-meta.js';
 import type { CronMode } from '../ast/dialect.js';
 import type { CronExpression } from '../ast/nodes.js';
-import { getWallClock, wallClockToUtc } from './tz.js';
-import type { WallClock } from './tz.js';
-import { matches, nextMatch } from './field-match.js';
+import { getWallClock, isValidTimeZone, localToUtc } from './tz.js';
+import type { LocalDateTime } from './tz.js';
+import { matches, nextMatch } from '../ast/field-match.js';
 import { dayMatches } from './day-match.js';
-import { MAX_ITERATION_STEPS } from './dst.js';
 
 export interface NextOccurrencesOptions {
   readonly mode: CronMode;
+  /** Exclusive lower bound. Defaults to now. */
   readonly startFrom?: Date;
-  /** IANA timezone name (default `'UTC'`). */
+  /** IANA timezone name the expression is evaluated in. Defaults to `'UTC'`. */
   readonly timezone?: string;
 }
 
 const DEFAULT_TZ = 'UTC';
-const QUARTZ_MIN_YEAR = 1970;
-const QUARTZ_MAX_YEAR = 2199;
+const MAX_COUNT = 100_000;
+// Searching stops after this many years without a match (unless the Quartz
+// year field says otherwise). Weekday/leap-year patterns repeat every 28
+// years, so any satisfiable expression fires well within it.
+const MAX_YEARS_AHEAD = 100;
+// Backstop against runaway loops; the year horizon normally stops first.
+const MAX_ITERATION_STEPS = 50_000;
 
 /**
- * Compute the next `count` fire times strictly after `options.startFrom`
- * (default: now). Returns a frozen array in ascending order.
+ * Compute the next `count` fire times strictly after `options.startFrom`,
+ * in ascending order.
  *
- * Throws `ParseError` for `@reboot` (`reboot-not-iterable`), invalid
- * `count`, invalid `startFrom`, or when no match is found within the
- * iteration ceiling (`no-match-in-search-window`).
+ * DST policy: a time that falls in a spring-forward gap is skipped; a time
+ * repeated by a fall-back fires once, at its first occurrence.
+ *
+ * @throws {CronError} on an invalid expression, `@reboot`
+ * (`reboot-not-iterable`), invalid `count`, `startFrom` or `timezone`, or
+ * when the expression never fires (`no-match-in-search-window`, e.g. Feb 31).
  *
  * @example
  * ```ts
@@ -34,7 +43,7 @@ const QUARTZ_MAX_YEAR = 2199;
  * nextOccurrences('*\/5 * * * *', 3, {
  *   mode: 'standard',
  *   startFrom: new Date('2026-06-01T10:00:00Z'),
- *   timezone: 'UTC',
+ *   timezone: 'Europe/Paris',
  * });
  * // [2026-06-01T10:05Z, 10:10Z, 10:15Z]
  * ```
@@ -45,165 +54,116 @@ export function nextOccurrences(
   options: NextOccurrencesOptions,
 ): ReadonlyArray<Date> {
   if (!Number.isInteger(count) || count < 0) {
-    throw new ParseError({
-      message: `count must be a non-negative integer (got ${count})`,
-      code: 'invalid-count',
-      errors: [],
-      source: '',
-    });
+    throw usageError('invalid-count', `count must be a non-negative integer (got ${count})`);
   }
-  if (count === 0) return Object.freeze([]);
-  if (count > 100_000) {
-    throw new ParseError({
-      message: `count ${count} exceeds the maximum (100_000)`,
-      code: 'count-too-large',
-      errors: [],
-      source: '',
-    });
+  if (count > MAX_COUNT) {
+    throw usageError('count-too-large', `count ${count} exceeds the maximum (${MAX_COUNT})`);
   }
 
-  const expr: CronExpression =
-    typeof input === 'string' ? parse(input, { mode: options.mode }) : input;
-
+  const expr = typeof input === 'string' ? parse(input, { mode: options.mode }) : input;
   if (expr.hasReboot) {
-    throw new ParseError({
-      message: '@reboot has no schedule; nextOccurrences() cannot iterate it',
-      code: 'reboot-not-iterable',
-      errors: [],
-      source: expr.source,
-    });
+    throw usageError('reboot-not-iterable', '@reboot has no schedule to iterate', expr.source);
   }
 
   const tz = options.timezone ?? DEFAULT_TZ;
+  if (!isValidTimeZone(tz)) {
+    throw usageError('invalid-timezone', `Unknown IANA timezone '${tz}'`, expr.source);
+  }
+
   const startFrom = options.startFrom ?? new Date();
-  if (Number.isNaN(startFrom.getTime())) {
-    throw new ParseError({
-      message: 'startFrom is an invalid Date',
-      code: 'invalid-start-from',
-      errors: [],
-      source: expr.source,
-    });
+  if (!(startFrom instanceof Date) || Number.isNaN(startFrom.getTime())) {
+    throw usageError('invalid-start-from', 'startFrom must be a valid Date', expr.source);
   }
 
   const results: Date[] = [];
   let current = startFrom;
   for (let i = 0; i < count; i++) {
-    const next = computeNext(expr, current, tz);
-    results.push(next);
-    current = next;
+    current = computeNext(expr, current, tz);
+    results.push(current);
   }
   return Object.freeze(results);
 }
 
 function computeNext(expr: CronExpression, fromUtc: Date, tz: string): Date {
-  const hasSeconds = expr.fields.seconds !== undefined;
-  const stepMs = hasSeconds ? 1000 : 60_000;
+  const meta = expr.dialect === 'standard' ? STANDARD_META : QUARTZ_META;
+  const { seconds, minute, hour, month, year } = expr.fields;
+  const stepMs = seconds === undefined ? 60_000 : 1000;
 
-  // One tick after `fromUtc`, rounded up to the field-precision boundary.
-  let candidate = new Date(Math.ceil((fromUtc.getTime() + 1) / stepMs) * stepMs);
+  let candidate = new Date(Math.floor(fromUtc.getTime() / stepMs) * stepMs + stepMs);
+  const lastYear =
+    year === undefined ? getWallClock(candidate, tz).year + MAX_YEARS_AHEAD : QUARTZ_META.year.max;
 
-  for (let iter = 0; iter < MAX_ITERATION_STEPS; iter++) {
+  // In a DST overlap the earlier instant of a local time can lie before
+  // `candidate`; take the later one so the search never moves backwards.
+  const jumpTo = (local: LocalDateTime): Date => {
+    const earlier = localToUtc(local, tz, 'earlier');
+    return earlier > candidate ? earlier : localToUtc(local, tz, 'later');
+  };
+
+  for (let i = 0; i < MAX_ITERATION_STEPS; i++) {
     const wc = getWallClock(candidate, tz);
+    if (wc.year > lastYear) break;
 
-    if (expr.fields.year !== undefined && !matches(expr.fields.year, wc.year)) {
-      const ny = nextMatch(expr.fields.year, wc.year + 1, QUARTZ_MIN_YEAR, QUARTZ_MAX_YEAR);
-      if (ny === null) throw noMatchError(expr);
-      candidate = wallClockToUtc(
-        { year: ny, month: 1, day: 1, hour: 0, minute: 0, second: 0 },
-        tz,
-      );
+    if (year !== undefined && !matches(year, wc.year, QUARTZ_META.year)) {
+      const ny = nextMatch(year, wc.year + 1, QUARTZ_META.year);
+      if (ny === null) break;
+      candidate = jumpTo(startOfDay(ny, 1, 1));
       continue;
     }
 
-    if (!matches(expr.fields.month, wc.month)) {
-      const nm = nextMatch(expr.fields.month, wc.month + 1, 1, 12);
-      candidate = wallClockToUtc(
-        nm === null
-          ? { year: wc.year + 1, month: 1, day: 1, hour: 0, minute: 0, second: 0 }
-          : { year: wc.year, month: nm, day: 1, hour: 0, minute: 0, second: 0 },
-        tz,
-      );
+    if (!matches(month, wc.month, meta.month)) {
+      const nm = nextMatch(month, wc.month + 1, meta.month);
+      candidate = jumpTo(nm === null ? startOfDay(wc.year + 1, 1, 1) : startOfDay(wc.year, nm, 1));
       continue;
     }
 
     if (!dayMatches(expr, wc)) {
-      candidate = wallClockToUtc(
-        { year: wc.year, month: wc.month, day: wc.day + 1, hour: 0, minute: 0, second: 0 },
-        tz,
+      candidate = jumpTo(startOfDay(wc.year, wc.month, wc.day + 1));
+      continue;
+    }
+
+    if (!matches(hour, wc.hour, meta.hour)) {
+      const nh = nextMatch(hour, wc.hour + 1, meta.hour);
+      candidate = jumpTo(
+        nh === null
+          ? startOfDay(wc.year, wc.month, wc.day + 1)
+          : { ...wc, hour: nh, minute: 0, second: 0 },
       );
       continue;
     }
 
-    if (!matches(expr.fields.hour, wc.hour)) {
-      const nh = nextMatch(expr.fields.hour, wc.hour + 1, 0, 23);
-      candidate = nh === null
-        ? advanceField(wc, 'day', tz)
-        : wallClockToUtc(
-            { year: wc.year, month: wc.month, day: wc.day, hour: nh, minute: 0, second: 0 },
-            tz,
-          );
+    if (!matches(minute, wc.minute, meta.minute)) {
+      const nmin = nextMatch(minute, wc.minute + 1, meta.minute);
+      candidate = jumpTo(
+        nmin === null
+          ? { ...wc, hour: wc.hour + 1, minute: 0, second: 0 }
+          : { ...wc, minute: nmin, second: 0 },
+      );
       continue;
     }
 
-    if (!matches(expr.fields.minute, wc.minute)) {
-      const nmin = nextMatch(expr.fields.minute, wc.minute + 1, 0, 59);
-      candidate = nmin === null
-        ? advanceField(wc, 'hour', tz)
-        : wallClockToUtc(
-            { year: wc.year, month: wc.month, day: wc.day, hour: wc.hour, minute: nmin, second: 0 },
-            tz,
-          );
-      continue;
-    }
-
-    if (expr.fields.seconds !== undefined && !matches(expr.fields.seconds, wc.second)) {
-      const ns = nextMatch(expr.fields.seconds, wc.second + 1, 0, 59);
-      candidate = ns === null
-        ? advanceField(wc, 'minute', tz)
-        : wallClockToUtc(
-            {
-              year: wc.year, month: wc.month, day: wc.day,
-              hour: wc.hour, minute: wc.minute, second: ns,
-            },
-            tz,
-          );
+    if (seconds !== undefined && !matches(seconds, wc.second, QUARTZ_META.seconds)) {
+      const ns = nextMatch(seconds, wc.second + 1, QUARTZ_META.seconds);
+      candidate = jumpTo(
+        ns === null ? { ...wc, minute: wc.minute + 1, second: 0 } : { ...wc, second: ns },
+      );
       continue;
     }
 
     return candidate;
   }
 
-  throw noMatchError(expr);
+  throw usageError(
+    'no-match-in-search-window',
+    'The expression has no fire time in the search window',
+    expr.source,
+  );
 }
 
-function advanceField(wc: WallClock, field: 'day' | 'hour' | 'minute', tz: string): Date {
-  switch (field) {
-    case 'day':
-      return wallClockToUtc(
-        { year: wc.year, month: wc.month, day: wc.day + 1, hour: 0, minute: 0, second: 0 },
-        tz,
-      );
-    case 'hour':
-      return wallClockToUtc(
-        { year: wc.year, month: wc.month, day: wc.day, hour: wc.hour + 1, minute: 0, second: 0 },
-        tz,
-      );
-    case 'minute':
-      return wallClockToUtc(
-        {
-          year: wc.year, month: wc.month, day: wc.day,
-          hour: wc.hour, minute: wc.minute + 1, second: 0,
-        },
-        tz,
-      );
-  }
+function startOfDay(year: number, month: number, day: number): LocalDateTime {
+  return { year, month, day, hour: 0, minute: 0, second: 0 };
 }
 
-function noMatchError(expr: CronExpression): ParseError {
-  return new ParseError({
-    message: `nextOccurrences could not find a match within ${MAX_ITERATION_STEPS} iteration steps`,
-    code: 'no-match-in-search-window',
-    errors: [],
-    source: expr.source,
-  });
+function usageError(code: string, message: string, source = ''): CronError {
+  return new CronError({ message, code, errors: [], source });
 }

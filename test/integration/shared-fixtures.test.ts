@@ -104,7 +104,10 @@ function runCase(c: TestCase): void {
             const matching = r.errors.find(
               (e) => e.code === expected.code && e.field === expected.field,
             );
-            expect(matching, `no error with code=${expected.code} field=${expected.field}`).toBeDefined();
+            expect(
+              matching,
+              `no error with code=${expected.code} field=${expected.field}`,
+            ).toBeDefined();
           }
         });
       }

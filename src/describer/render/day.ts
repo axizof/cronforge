@@ -1,116 +1,95 @@
-import { interpolate } from './interpolate.js';
-import { nthLabel, ordinalSuffix } from './ordinals.js';
+import { QUARTZ_META, STANDARD_META } from '../../parser/field-meta.js';
+import { startsWithStar } from '../../iterator/day-match.js';
 import type { FieldAst, FieldSet } from '../../ast/nodes.js';
-import type { LocaleData } from '../locales/index.js';
 import type { ResolvedCronMode } from '../../ast/dialect.js';
+import type { LocaleData } from '../locales/index.js';
+import { expand, shapeOf } from './shape.js';
+import { listValues, nthLabel, ordinal, phrase, toRuns, weekdayName } from './text.js';
 
-export interface DayFragment {
-  readonly phrase: string;
-  readonly leadingComma: boolean;
-}
-
+/** Day-of-month + day-of-week clause, or `null` when every day matches. */
 export function renderDay(
   fields: FieldSet,
   dialect: ResolvedCronMode,
-  monthIsWildcard: boolean,
-  locale: LocaleData,
-): DayFragment | null {
-  const { dom, dow } = fields;
-  const domIsEvery = dom.kind === 'wildcard' || dom.kind === 'any';
-  const dowIsEvery = dow.kind === 'wildcard' || dow.kind === 'any';
-
-  if (domIsEvery && dowIsEvery) {
-    if (!monthIsWildcard) return null;
-    // Standard: ", every day". Quartz uses "?" semantics → no comma.
-    return {
-      phrase: locale.atoms['every_day']!,
-      leadingComma: dialect === 'standard',
-    };
-  }
-
-  if (!dowIsEvery) {
-    const dowPhrase = renderDowNode(dow, dialect, locale);
-    if (dowPhrase !== null) return { phrase: dowPhrase, leadingComma: true };
-  }
-  if (!domIsEvery) {
-    const domPhrase = renderDomNode(dom, locale);
-    if (domPhrase !== null) return { phrase: domPhrase, leadingComma: true };
-  }
-  return null;
-}
-
-function renderDowNode(
-  node: FieldAst,
-  dialect: ResolvedCronMode,
   locale: LocaleData,
 ): string | null {
-  switch (node.kind) {
-    case 'value':
-      return interpolate(locale.atoms['only_on_weekday']!, {
-        weekday: weekdayName(node.value, dialect, locale),
-      });
-    case 'range':
-      return interpolate(locale.atoms['from_to_weekday']!, {
-        from: weekdayName(node.from, dialect, locale),
-        to: weekdayName(node.to, dialect, locale),
-      });
-    case 'list': {
-      const names = node.members.map((m) =>
-        m.kind === 'value' ? weekdayName(m.value, dialect, locale) : '?',
-      );
-      return interpolate(locale.atoms['on_weekdays']!, { weekdays: joinList(names) });
-    }
+  const dom = describeDom(fields.dom, locale);
+  if (dom === null) return describeDow(fields.dow, dialect, locale, true);
+
+  // Standard cron fires when either field matches (see day-match.ts).
+  const either =
+    dialect === 'standard' && !startsWithStar(fields.dom) && !startsWithStar(fields.dow);
+  const dow = describeDow(fields.dow, dialect, locale, !either);
+  if (dow === null) return dom;
+  return either ? `${dom} ${phrase(locale, 'or')} ${dow}` : `${dom}, ${dow}`;
+}
+
+function describeDom(ast: FieldAst, locale: LocaleData): string | null {
+  switch (ast.kind) {
+    case 'lastDom':
+      return ast.offset === 0
+        ? phrase(locale, 'last_day_of_month')
+        : phrase(locale, 'last_day_offset', { offset: String(ast.offset) });
+    case 'lastWeekday':
+      return phrase(locale, 'last_business_day_of_month');
+    case 'weekdayNearest':
+      return phrase(locale, 'weekday_nearest_to', { day: ordinal(ast.day, locale) });
+    default:
+      break;
+  }
+
+  const bounds = STANDARD_META.dom;
+  const shape = shapeOf(ast, bounds);
+  if (shape.kind === 'all') return null;
+  if (shape.kind === 'every' && shape.full) {
+    return shape.step === 1 ? null : phrase(locale, 'every_x_days', { count: String(shape.step) });
+  }
+
+  const days = expand(ast, bounds);
+  const [only] = days;
+  if (days.length === 1 && only !== undefined) {
+    return phrase(locale, 'on_day_of_month', { day: ordinal(only, locale) });
+  }
+  return phrase(locale, 'on_days_of_month', {
+    days: listValues(days, (d) => ordinal(d, locale), locale),
+  });
+}
+
+function describeDow(
+  ast: FieldAst,
+  dialect: ResolvedCronMode,
+  locale: LocaleData,
+  standalone: boolean,
+): string | null {
+  // `nL` and `n#m` are Quartz-only, where SUN = 1.
+  switch (ast.kind) {
     case 'lastDow':
-      return interpolate(locale.atoms['last_weekday_of_month']!, {
-        weekday: weekdayName(node.weekday, dialect, locale),
+      return phrase(locale, 'last_weekday_of_month', {
+        weekday: weekdayName(ast.weekday - 1, locale),
       });
     case 'nthDow':
-      return interpolate(locale.atoms['nth_weekday_of_month']!, {
-        nth: nthLabel(node.nth, locale),
-        weekday: weekdayName(node.weekday, dialect, locale),
+      return phrase(locale, 'nth_weekday_of_month', {
+        nth: nthLabel(ast.nth, locale),
+        weekday: weekdayName(ast.weekday - 1, locale),
       });
     default:
-      return null;
+      break;
   }
-}
 
-function renderDomNode(node: FieldAst, locale: LocaleData): string | null {
-  switch (node.kind) {
-    case 'value':
-      return interpolate(locale.atoms['on_day_of_month']!, {
-        day: String(node.value),
-        ord: ordinalSuffix(node.value, locale),
-      });
-    case 'list': {
-      const days = node.members
-        .filter((m): m is { readonly kind: 'value'; readonly value: number } => m.kind === 'value')
-        .map((m) => `${m.value}${ordinalSuffix(m.value, locale)}`);
-      return interpolate(locale.atoms['on_days_of_month']!, { days: joinList(days) });
+  const bounds = dialect === 'quartz' ? QUARTZ_META.dow : STANDARD_META.dow;
+  const sundayZero = expand(ast, bounds).map((d) => (dialect === 'quartz' ? d - 1 : d % 7));
+  const days = [...new Set(sundayZero)].sort((a, b) => a - b);
+  if (days.length === 0 || days.length === 7) return null;
+
+  const name = (d: number): string => weekdayName(d, locale);
+  const runs = toRuns(days);
+  const [single] = runs;
+  if (runs.length === 1 && single !== undefined) {
+    if (single.from === single.to && standalone) {
+      return phrase(locale, 'only_on_weekday', { weekday: name(single.from) });
     }
-    case 'lastDom':
-      if (node.offset === 0) return locale.atoms['last_day_of_month']!;
-      return interpolate(locale.atoms['last_day_offset']!, {
-        offset: String(node.offset),
-        ord: ordinalSuffix(node.offset, locale),
-      });
-    case 'weekdayNearest':
-      return interpolate(locale.atoms['weekday_nearest_to']!, {
-        day: String(node.day),
-        ord: ordinalSuffix(node.day, locale),
-      });
-    default:
-      return null;
+    if (single.to - single.from >= 2) {
+      return phrase(locale, 'from_to_weekday', { from: name(single.from), to: name(single.to) });
+    }
   }
-}
-
-/** Translate dialect-encoded weekday → standard SUN=0 numbering for locale lookup. */
-function weekdayName(n: number, dialect: ResolvedCronMode, locale: LocaleData): string {
-  const stdN = dialect === 'standard' ? n : ((n - 1) % 7 + 7) % 7;
-  return locale.weekdays[String(stdN)] ?? String(n);
-}
-
-function joinList(items: ReadonlyArray<string>): string {
-  if (items.length === 0) return '';
-  if (items.length === 1) return items[0]!;
-  return `${items.slice(0, -1).join(', ')}, ${items[items.length - 1]!}`;
+  return phrase(locale, 'on_weekdays', { weekdays: listValues(days, name, locale) });
 }

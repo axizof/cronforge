@@ -1,13 +1,12 @@
 import type { ResolvedCronMode, SourcePosition } from '../../ast/dialect.js';
 import type { ValidationError } from '../../parser/errors.js';
 
-export function checkFieldCount(
+export function fieldCountError(
   dialect: ResolvedCronMode,
   tokenCount: number,
   position: SourcePosition,
-): ValidationError | null {
+): ValidationError {
   if (dialect === 'standard') {
-    if (tokenCount === 5) return null;
     return {
       field: 'whole',
       position,
@@ -16,7 +15,6 @@ export function checkFieldCount(
       suggestion: 'Use mode: "quartz" for 6- or 7-field expressions',
     };
   }
-  if (tokenCount === 6 || tokenCount === 7) return null;
   return {
     field: 'whole',
     position,

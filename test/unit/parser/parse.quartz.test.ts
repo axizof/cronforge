@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parse } from '../../../src/parser/parse.js';
+import { parse, tryParse } from '../../../src/parser/parse.js';
 
 describe('parse() - Quartz mode', () => {
   it('parses a 6-field Quartz expression', () => {
@@ -75,5 +75,20 @@ describe('parse() - Quartz mode', () => {
     const expr = parse('0 0 12 ? * MON', { mode: 'quartz' });
     expect(Object.isFrozen(expr.fields)).toBe(true);
     expect(Object.isFrozen(expr.fields.dom)).toBe(true);
+  });
+
+  it.each([
+    ['0 0/15 * * * ?', 'minute', { kind: 'step', base: { kind: 'value', value: 0 }, step: 15 }],
+    ['0 0 12 LW * ?', 'dom', { kind: 'lastWeekday' }],
+    ['0 0 12 ? * L', 'dow', { kind: 'value', value: 7 }],
+  ] as const)('parses %s', (expression, field, ast) => {
+    expect(parse(expression, { mode: 'quartz' }).fields[field]).toEqual(ast);
+  });
+
+  it('rejects LW outside day-of-month', () => {
+    const r = tryParse('0 0 12 ? * LW', { mode: 'quartz' });
+    expect(r.ok ? [] : r.error.errors.map((e) => e.code)).toContain(
+      'last-weekday-not-allowed-here',
+    );
   });
 });

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { nextOccurrences } from '../../../src/iterator/next-occurrences.js';
 
 describe('nextOccurrences - Quartz mode', () => {
-  it('honours seconds precision (FR-018)', () => {
+  it('honours seconds precision', () => {
     const r = nextOccurrences('30 0 12 * * ?', 1, {
       mode: 'quartz',
       startFrom: new Date('2026-06-01T00:00:00Z'),
@@ -24,7 +24,7 @@ describe('nextOccurrences - Quartz mode', () => {
     ]);
   });
 
-  it('Quartz MON (dow=2) fires on Mondays (US3 scenario 2)', () => {
+  it('Quartz MON (dow=2) fires on Mondays', () => {
     // 2026-05-31 is a Sunday; next Monday is 2026-06-01 at 12:00:00.
     const r = nextOccurrences('0 0 12 ? * MON', 2, {
       mode: 'quartz',

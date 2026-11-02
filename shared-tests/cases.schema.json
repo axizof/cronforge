@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/battlefilm/cronforge/shared-tests/cases.schema.json",
+  "$id": "https://github.com/axizof/cronforge/shared-tests/cases.schema.json",
   "title": "CronForge shared-test fixture",
   "description": "Language-agnostic behavioural fixture consumed by every CronForge implementation.",
   "type": "object",

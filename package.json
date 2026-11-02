@@ -1,7 +1,7 @@
 {
   "name": "cronforge",
   "version": "1.0.0",
-  "description": "Zero-dependency TypeScript toolkit for cron expressions - parse, validate, describe (multilingual), iterate, and build for both standard Unix (5-field) and Quartz (6–7 field) dialects.",
+  "description": "Zero-dependency TypeScript toolkit for cron expressions: parse, validate, describe in 5 languages, compute next run times (timezone and DST aware) and build expressions from structured input. Standard Unix and Quartz dialects.",
   "keywords": [
     "cron",
     "crontab",
@@ -15,80 +15,71 @@
     "typescript"
   ],
   "license": "MIT",
+  "author": "axizof",
   "repository": {
     "type": "git",
-    "url": "https://github.com/battlefilm/cronforge.git"
+    "url": "git+https://github.com/axizof/cronforge.git"
   },
   "bugs": {
-    "url": "https://github.com/battlefilm/cronforge/issues"
+    "url": "https://github.com/axizof/cronforge/issues"
   },
-  "homepage": "https://github.com/battlefilm/cronforge#readme",
-  "author": "CronForge contributors",
+  "homepage": "https://github.com/axizof/cronforge#readme",
   "type": "module",
   "sideEffects": false,
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "exports": {
     ".": {
       "import": {
-        "types": "./dist/index.d.mts",
-        "default": "./dist/index.mjs"
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
       },
       "require": {
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
     },
-    "./locales/en.json": "./dist/locales/en.json",
-    "./locales/fr.json": "./dist/locales/fr.json",
-    "./locales/es.json": "./dist/locales/es.json",
-    "./locales/de.json": "./dist/locales/de.json",
-    "./locales/it.json": "./dist/locales/it.json",
+    "./locales/*.json": "./dist/locales/*.json",
     "./package.json": "./package.json"
   },
   "main": "./dist/index.cjs",
-  "module": "./dist/index.mjs",
-  "types": "./dist/index.d.mts",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
     "dist",
-    "examples.md",
-    "llms.txt",
-    "llms-full.txt",
-    "README.md",
-    "CHANGELOG.md",
-    "LICENSE"
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsup && node scripts/copy-locales.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:bench": "vitest bench",
+    "bench": "vitest bench --run",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "check:bundle-size": "node scripts/check-bundle-size.mjs",
-    "check:jsdoc": "node scripts/check-jsdoc-coverage.mjs",
-    "check:no-deps": "node scripts/check-no-runtime-deps.mjs",
-    "verify": "npm run typecheck && npm run lint && npm run test && npm run build && npm run check:no-deps && npm run check:bundle-size && npm run check:jsdoc",
+    "lint": "eslint . --max-warnings=0",
+    "format": "prettier --write . --ignore-path .gitignore --ignore-path .prettierignore --ignore-path .git/info/exclude",
+    "format:check": "prettier --check . --ignore-path .gitignore --ignore-path .prettierignore --ignore-path .git/info/exclude",
+    "check:package": "publint --strict && attw --pack . --profile node16",
+    "check:size": "node scripts/check-bundle-size.mjs",
+    "verify": "npm run typecheck && npm run lint && npm run format:check && npm run test:coverage && npm run build && npm run check:package && npm run check:size",
     "prepare": "husky",
     "prepublishOnly": "npm run verify"
   },
   "devDependencies": {
-    "@commitlint/cli": "^19.0.0",
-    "@commitlint/config-conventional": "^19.0.0",
-    "@types/node": "^20.0.0",
-    "@typescript-eslint/eslint-plugin": "^7.0.0",
-    "@typescript-eslint/parser": "^7.0.0",
-    "@vitest/coverage-v8": "^1.6.0",
-    "eslint": "^8.57.0",
-    "husky": "^9.0.0",
-    "prettier": "^3.2.0",
-    "tsup": "^8.0.0",
-    "typescript": "^5.4.0",
-    "vitest": "^1.6.0"
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@commitlint/cli": "^21.2.4",
+    "@commitlint/config-conventional": "^21.2.4",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.19.0",
+    "@vitest/coverage-v8": "^5.1.0",
+    "eslint": "^10.14.0",
+    "husky": "^9.1.7",
+    "prettier": "^3.9.10",
+    "publint": "^0.3.25",
+    "tsup": "^9.0.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.1.0"
   }
 }

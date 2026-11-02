@@ -1,12 +1,10 @@
-import { deepFreeze } from '../ast/freeze.js';
-import { anyField, makeCronExpression, wildcardField } from '../ast/nodes.js';
 import type { FieldAst, FieldSet } from '../ast/nodes.js';
 import type { ResolvedCronMode } from '../ast/dialect.js';
-import { parse } from '../parser/parse.js';
-import { ParseError } from '../parser/errors.js';
+import { CronError } from '../parser/errors.js';
 import { ok, err } from '../result/result.js';
 import type { Result } from '../result/result.js';
-import { serialize } from '../serializer/serialize.js';
+import { serializeFieldSet } from '../serializer/serialize.js';
+import { validate } from '../validator/validate.js';
 import { resolveMonth, resolveWeekday, validateInput } from './input.js';
 import type { CronBuilderInput, TimeOfDay } from './input.js';
 import { makeBuildError } from './errors.js';
@@ -17,9 +15,10 @@ export interface BuildOptions {
 }
 
 /**
- * Build a cron string from a structured input. Throws `ParseError`
- * wrapping a `BuildError` on invalid input. Use `buildResult()` for the
- * never-throws variant.
+ * Build a cron string from a structured input.
+ *
+ * @throws {CronError} carrying the `BuildError` code when the input is
+ * invalid. Use `buildResult()` for the never-throws variant.
  *
  * @example
  * ```ts
@@ -35,7 +34,7 @@ export interface BuildOptions {
 export function build(input: CronBuilderInput, options: BuildOptions): string {
   const r = buildResult(input, options);
   if (r.ok) return r.value;
-  throw new ParseError({
+  throw new CronError({
     message: r.error.message,
     code: r.error.code,
     errors: [
@@ -69,278 +68,149 @@ export function buildResult(
   input: CronBuilderInput,
   options: BuildOptions,
 ): Result<string, BuildError> {
-  if (options.mode !== 'standard' && options.mode !== 'quartz') {
+  const { mode } = options;
+  if (mode !== 'standard' && mode !== 'quartz') {
     return err(
       makeBuildError({
         code: 'invalid-mode',
-        message: `build() requires mode: 'standard' | 'quartz' (got '${String(options.mode)}')`,
+        message: `build() requires mode: 'standard' | 'quartz' (got '${String(mode)}')`,
       }),
     );
   }
 
-  const validationErr = validateInput(input, options.mode);
-  if (validationErr !== null) return err(validationErr);
+  const inputError = validateInput(input, mode);
+  if (inputError !== null) return err(inputError);
 
-  let fields: FieldSet;
-  try {
-    fields = buildFieldSet(input, options.mode);
-  } catch (e) {
+  const expression = serializeFieldSet(buildFieldSet(input, mode), mode);
+  // A builder bug must surface as an error, never as a silently wrong schedule.
+  const check = validate(expression, { mode });
+  if (!check.valid) {
     return err(
       makeBuildError({
         code: 'internal-error',
-        message: `Internal builder error: ${e instanceof Error ? e.message : String(e)}`,
+        message: `Builder produced an invalid expression '${expression}': ${check.errors[0]?.message ?? ''}`,
       }),
     );
   }
-
-  const expr = makeCronExpression({
-    source: '',
-    dialect: options.mode,
-    fields,
-    macro: null,
-    hasReboot: false,
-  });
-  const str = serialize(expr);
-
-  try {
-    parse(str, { mode: options.mode });
-  } catch (e) {
-    if (e instanceof ParseError) {
-      return err(
-        makeBuildError({
-          code: 'roundtrip-failed',
-          message: `Builder produced '${str}' but it does not re-parse: ${e.message}`,
-        }),
-      );
-    }
-    throw e;
-  }
-  return ok(str);
+  return ok(expression);
 }
 
 function buildFieldSet(input: CronBuilderInput, mode: ResolvedCronMode): FieldSet {
+  const base: FieldSet =
+    mode === 'standard'
+      ? { minute: WILDCARD, hour: WILDCARD, dom: WILDCARD, month: WILDCARD, dow: WILDCARD }
+      : {
+          seconds: value(0),
+          minute: WILDCARD,
+          hour: WILDCARD,
+          dom: WILDCARD,
+          month: WILDCARD,
+          dow: ANY,
+        };
+
   switch (input.kind) {
-    case 'everyN': return everyNFields(input, mode);
-    case 'at': return atFields(input, mode);
-    case 'daysOfWeek': return daysOfWeekFields(input, mode);
-    case 'daysOfMonth': return daysOfMonthFields(input, mode);
-    case 'hourRange': return hourRangeFields(input, mode);
-    case 'monthRange': return monthRangeFields(input, mode);
-    case 'nthWeekdayOfMonth': return nthWeekdayOfMonthFields(input, mode);
-    case 'lastDayOfMonth': return lastDayOfMonthFields(input, mode);
-    case 'lastWeekdayOfMonth': return lastWeekdayOfMonthFields(input, mode);
-    case 'weekdayNearestTo': return weekdayNearestToFields(input, mode);
-    case 'composite':
-      return mergeComposite(input.parts.map((p) => buildFieldSet(p, mode)), mode);
+    case 'everyN':
+      return everyN(base, input.unit, input.n);
+    case 'at':
+      return {
+        ...base,
+        hour: values(input.times.map((t) => t.hour)),
+        minute: values(input.times.map((t) => t.minute)),
+        ...(mode === 'quartz' ? { seconds: values(input.times.map((t) => t.second ?? 0)) } : {}),
+      };
+    case 'daysOfWeek':
+      return {
+        ...base,
+        ...timeOfDay(input.at, mode),
+        ...onDow(values(input.days.map((d) => resolveWeekday(d, mode))), mode),
+      };
+    case 'daysOfMonth':
+      return { ...base, ...timeOfDay(input.at, mode), dom: values(input.days) };
+    case 'hourRange':
+      return { ...base, minute: value(input.minute ?? 0), hour: range(input.from, input.to) };
+    case 'monthRange':
+      return {
+        ...base,
+        ...(input.at === undefined ? {} : timeOfDay(input.at, mode)),
+        month: range(resolveMonth(input.from), resolveMonth(input.to)),
+      };
+    case 'nthWeekdayOfMonth':
+      return {
+        ...base,
+        ...timeOfDay(input.at, mode),
+        ...onDow(
+          { kind: 'nthDow', weekday: resolveWeekday(input.weekday, mode), nth: input.nth },
+          mode,
+        ),
+      };
+    case 'lastDayOfMonth':
+      return { ...base, ...timeOfDay(input.at, mode), dom: { kind: 'lastDom', offset: 0 } };
+    case 'lastWeekdayOfMonth':
+      return {
+        ...base,
+        ...timeOfDay(input.at, mode),
+        ...onDow({ kind: 'lastDow', weekday: resolveWeekday(input.weekday, mode) }, mode),
+      };
+    case 'weekdayNearestTo':
+      return {
+        ...base,
+        ...timeOfDay(input.at, mode),
+        dom: { kind: 'weekdayNearest', day: input.day },
+      };
   }
 }
 
-function everyNFields(
-  input: Extract<CronBuilderInput, { kind: 'everyN' }>,
-  mode: ResolvedCronMode,
+function everyN(
+  base: FieldSet,
+  unit: Extract<CronBuilderInput, { kind: 'everyN' }>['unit'],
+  n: number,
 ): FieldSet {
-  const base = baseFields(mode);
-  const stepNode = step(wildcardField(), input.n);
-  switch (input.unit) {
+  const every: FieldAst = { kind: 'step', base: WILDCARD, step: n };
+  const midnight = { minute: value(0), hour: value(0) };
+  switch (unit) {
     case 'minute':
-      return overlay(base, { minute: stepNode });
+      return { ...base, minute: every };
     case 'hour':
-      return overlay(base, { minute: value(0), hour: stepNode });
+      return { ...base, minute: value(0), hour: every };
     case 'day':
-      return overlay(base, {
-        minute: value(0),
-        hour: value(0),
-        dom: stepNode,
-        ...(mode === 'quartz' ? { dow: anyField() } : {}),
-      });
+      return { ...base, ...midnight, dom: every };
     case 'month':
-      return overlay(base, {
-        minute: value(0),
-        hour: value(0),
-        dom: value(1),
-        month: stepNode,
-        ...(mode === 'quartz' ? { dow: anyField() } : {}),
-      });
-    case 'year': {
-      // `year` only exists in 7-field Quartz; otherwise fall back to month-N.
-      const next = overlay(base, {
-        minute: value(0),
-        hour: value(0),
+      return { ...base, ...midnight, dom: value(1), month: every };
+    case 'year':
+      // n > 1 is rejected in standard mode, so the year field is Quartz-only here.
+      return {
+        ...base,
+        ...midnight,
         dom: value(1),
         month: value(1),
-        ...(mode === 'quartz' ? { dow: anyField() } : {}),
-      });
-      if (mode === 'quartz') return { ...next, year: stepNode };
-      return next;
-    }
+        ...(n > 1 ? { year: every } : {}),
+      };
   }
 }
 
-function atFields(
-  input: Extract<CronBuilderInput, { kind: 'at' }>,
-  mode: ResolvedCronMode,
-): FieldSet {
-  const base = baseFields(mode);
-  const minuteAst = list(input.times.map((t) => value(t.minute)));
-  const hourAst = list(input.times.map((t) => value(t.hour)));
-  const out = overlay(base, { minute: minuteAst, hour: hourAst });
-  if (mode === 'quartz') {
-    const secondAst = list(input.times.map((t) => value(t.second ?? 0)));
-    return overlay(out, { seconds: secondAst, dom: anyField() });
-  }
-  return out;
+// Quartz needs `?` in day-of-month as soon as day-of-week is set.
+function onDow(dow: FieldAst, mode: ResolvedCronMode): Partial<FieldSet> {
+  return mode === 'quartz' ? { dom: ANY, dow } : { dow };
 }
 
-function daysOfWeekFields(
-  input: Extract<CronBuilderInput, { kind: 'daysOfWeek' }>,
-  mode: ResolvedCronMode,
-): FieldSet {
-  const dows = list(input.days.map((d) => value(resolveWeekday(d, mode))));
-  return overlay(baseFields(mode), {
-    ...timeOfDayOverlay(input.at, mode),
-    dow: dows,
-    ...(mode === 'quartz' ? { dom: anyField() } : {}),
-  });
+function timeOfDay(t: TimeOfDay, mode: ResolvedCronMode): Partial<FieldSet> {
+  const time = { minute: value(t.minute), hour: value(t.hour) };
+  return mode === 'quartz' ? { ...time, seconds: value(t.second ?? 0) } : time;
 }
 
-function daysOfMonthFields(
-  input: Extract<CronBuilderInput, { kind: 'daysOfMonth' }>,
-  mode: ResolvedCronMode,
-): FieldSet {
-  const doms = list(input.days.map((d) => value(d)));
-  return overlay(baseFields(mode), {
-    ...timeOfDayOverlay(input.at, mode),
-    dom: doms,
-    ...(mode === 'quartz' ? { dow: anyField() } : {}),
-  });
-}
-
-function hourRangeFields(
-  input: Extract<CronBuilderInput, { kind: 'hourRange' }>,
-  mode: ResolvedCronMode,
-): FieldSet {
-  return overlay(baseFields(mode), {
-    minute: value(input.minute ?? 0),
-    hour: range(input.from, input.to),
-    ...(mode === 'quartz' ? { dom: anyField() } : {}),
-  });
-}
-
-function monthRangeFields(
-  input: Extract<CronBuilderInput, { kind: 'monthRange' }>,
-  mode: ResolvedCronMode,
-): FieldSet {
-  const monthAst = range(resolveMonth(input.from), resolveMonth(input.to));
-  return overlay(baseFields(mode), {
-    month: monthAst,
-    ...(input.at !== undefined ? timeOfDayOverlay(input.at, mode) : {}),
-    ...(mode === 'quartz' && input.at !== undefined ? { dom: anyField() } : {}),
-  });
-}
-
-function nthWeekdayOfMonthFields(
-  input: Extract<CronBuilderInput, { kind: 'nthWeekdayOfMonth' }>,
-  mode: ResolvedCronMode,
-): FieldSet {
-  return overlay(baseFields(mode), {
-    ...timeOfDayOverlay(input.at, mode),
-    dom: anyField(),
-    dow: deepFreeze({
-      kind: 'nthDow',
-      weekday: resolveWeekday(input.weekday, mode),
-      nth: input.nth,
-    } as FieldAst),
-  });
-}
-
-function lastDayOfMonthFields(
-  input: Extract<CronBuilderInput, { kind: 'lastDayOfMonth' }>,
-  mode: ResolvedCronMode,
-): FieldSet {
-  return overlay(baseFields(mode), {
-    ...timeOfDayOverlay(input.at, mode),
-    dom: deepFreeze({ kind: 'lastDom', offset: 0 } as FieldAst),
-    dow: anyField(),
-  });
-}
-
-function lastWeekdayOfMonthFields(
-  input: Extract<CronBuilderInput, { kind: 'lastWeekdayOfMonth' }>,
-  mode: ResolvedCronMode,
-): FieldSet {
-  return overlay(baseFields(mode), {
-    ...timeOfDayOverlay(input.at, mode),
-    dom: anyField(),
-    dow: deepFreeze({
-      kind: 'lastDow',
-      weekday: resolveWeekday(input.weekday, mode),
-    } as FieldAst),
-  });
-}
-
-function weekdayNearestToFields(
-  input: Extract<CronBuilderInput, { kind: 'weekdayNearestTo' }>,
-  mode: ResolvedCronMode,
-): FieldSet {
-  return overlay(baseFields(mode), {
-    ...timeOfDayOverlay(input.at, mode),
-    dom: deepFreeze({ kind: 'weekdayNearest', day: input.day } as FieldAst),
-    dow: anyField(),
-  });
-}
-
-function mergeComposite(parts: ReadonlyArray<FieldSet>, mode: ResolvedCronMode): FieldSet {
-  const out: Partial<FieldSet> = {};
-  const fields: ReadonlyArray<keyof FieldSet> =
-    mode === 'standard'
-      ? ['minute', 'hour', 'dom', 'month', 'dow']
-      : ['seconds', 'minute', 'hour', 'dom', 'month', 'dow', 'year'];
-  for (const f of fields) {
-    const nodes: FieldAst[] = [];
-    for (const p of parts) {
-      const n = p[f];
-      if (n !== undefined && !nodes.some((x) => sameAst(x, n))) nodes.push(n);
-    }
-    if (nodes.length === 0) continue;
-    (out as Record<string, FieldAst>)[f as string] = nodes.length === 1 ? nodes[0]! : list(nodes);
-  }
-  return out as FieldSet;
-}
-
-function baseFields(mode: ResolvedCronMode): FieldSet {
-  const w = wildcardField();
-  if (mode === 'standard') return { minute: w, hour: w, dom: w, month: w, dow: w };
-  return { seconds: w, minute: w, hour: w, dom: w, month: w, dow: w };
-}
-
-function overlay(base: FieldSet, patch: Partial<FieldSet>): FieldSet {
-  return { ...base, ...patch };
-}
-
-function timeOfDayOverlay(t: TimeOfDay, mode: ResolvedCronMode): Partial<FieldSet> {
-  const minute = value(t.minute);
-  const hour = value(t.hour);
-  if (mode === 'quartz') return { seconds: value(t.second ?? 0), minute, hour };
-  return { minute, hour };
-}
+const WILDCARD: FieldAst = { kind: 'wildcard' };
+const ANY: FieldAst = { kind: 'any' };
 
 function value(n: number): FieldAst {
-  return deepFreeze({ kind: 'value', value: n } as FieldAst);
+  return { kind: 'value', value: n };
 }
 
 function range(from: number, to: number): FieldAst {
-  return deepFreeze({ kind: 'range', from, to } as FieldAst);
+  return { kind: 'range', from, to };
 }
 
-function step(base: FieldAst, n: number): FieldAst {
-  return deepFreeze({ kind: 'step', base, step: n } as FieldAst);
-}
-
-function list(members: ReadonlyArray<FieldAst>): FieldAst {
-  if (members.length === 1) return members[0]!;
-  return deepFreeze({ kind: 'list', members: Object.freeze([...members]) } as FieldAst);
-}
-
-function sameAst(a: FieldAst, b: FieldAst): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+function values(ns: ReadonlyArray<number>): FieldAst {
+  const members = [...new Set(ns)].sort((a, b) => a - b).map(value);
+  const [only, ...rest] = members;
+  return only !== undefined && rest.length === 0 ? only : { kind: 'list', members };
 }

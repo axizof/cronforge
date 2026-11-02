@@ -5,10 +5,7 @@ import type { ValidationError } from './errors.js';
 import { checkValueInRange } from '../validator/rules/value-range.js';
 import { checkQuartzOnlyFeature } from '../validator/rules/quartz-only-features.js';
 import type { FieldMeta } from './field-meta.js';
-
-type Result =
-  | { readonly ok: true; readonly ast: FieldAst }
-  | { readonly ok: false; readonly errors: ReadonlyArray<ValidationError> };
+import type { FieldParseResult } from './field-parser.js';
 
 const NL_PATTERN = /^(\d{1,2})L$/u;
 const NW_PATTERN = /^(\d{1,2})W$/u;
@@ -21,7 +18,7 @@ export function parseQuartzExtension(
   position: SourcePosition,
   meta: FieldMeta,
   dialect: ResolvedCronMode,
-): Result | null {
+): FieldParseResult | null {
   if (lexeme === '?') {
     const e = checkQuartzOnlyFeature('?', dialect, meta.name, position);
     if (e !== null) return failure(e);
@@ -35,6 +32,26 @@ export function parseQuartzExtension(
       });
     }
     return ok(deepFreeze({ kind: 'any' } as FieldAst));
+  }
+
+  // In day-of-week, a bare `L` is Quartz shorthand for Saturday (7).
+  if (lexeme === 'L' && meta.allowLastDow === true) {
+    return ok(deepFreeze({ kind: 'value', value: 7 } as FieldAst));
+  }
+
+  if (lexeme === 'LW') {
+    const e = checkQuartzOnlyFeature('W', dialect, meta.name, position);
+    if (e !== null) return failure(e);
+    if (meta.allowLastDom !== true) {
+      return failure({
+        field: meta.name,
+        position,
+        code: 'last-weekday-not-allowed-here',
+        message: `'LW' (last weekday of month) is only valid in day-of-month`,
+        suggestion: null,
+      });
+    }
+    return ok(deepFreeze({ kind: 'lastWeekday' } as FieldAst));
   }
 
   if (lexeme === 'L' || lexeme.startsWith('L-')) {
@@ -88,7 +105,7 @@ export function parseQuartzExtension(
         suggestion: null,
       });
     }
-    const weekday = Number.parseInt(nl[1] as string, 10);
+    const weekday = Number(nl[1]);
     const rangeErr = checkValueInRange(weekday, meta, position);
     if (rangeErr !== null) return failure(rangeErr);
     return ok(deepFreeze({ kind: 'lastDow', weekday } as FieldAst));
@@ -107,7 +124,7 @@ export function parseQuartzExtension(
         suggestion: null,
       });
     }
-    const day = Number.parseInt(nw[1] as string, 10);
+    const day = Number(nw[1]);
     const rangeErr = checkValueInRange(day, meta, position);
     if (rangeErr !== null) return failure(rangeErr);
     return ok(deepFreeze({ kind: 'weekdayNearest', day } as FieldAst));
@@ -126,8 +143,8 @@ export function parseQuartzExtension(
         suggestion: null,
       });
     }
-    const weekday = Number.parseInt(nh[1] as string, 10);
-    const nth = Number.parseInt(nh[2] as string, 10) as 1 | 2 | 3 | 4 | 5;
+    const weekday = Number(nh[1]);
+    const nth = Number(nh[2]) as 1 | 2 | 3 | 4 | 5;
     const rangeErr = checkValueInRange(weekday, meta, position);
     if (rangeErr !== null) return failure(rangeErr);
     return ok(deepFreeze({ kind: 'nthDow', weekday, nth } as FieldAst));
@@ -136,10 +153,10 @@ export function parseQuartzExtension(
   return null;
 }
 
-function ok(ast: FieldAst): Result {
+function ok(ast: FieldAst): FieldParseResult {
   return { ok: true, ast };
 }
 
-function failure(err: ValidationError): Result {
+function failure(err: ValidationError): FieldParseResult {
   return { ok: false, errors: Object.freeze([err]) };
 }

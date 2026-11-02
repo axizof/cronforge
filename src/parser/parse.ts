@@ -8,16 +8,16 @@ import type {
 } from '../ast/dialect.js';
 import { makeCronExpression, wildcardField } from '../ast/nodes.js';
 import type { CronExpression, FieldAst, FieldSet } from '../ast/nodes.js';
-import { ParseError } from './errors.js';
+import { CronError } from './errors.js';
 import type { ValidationError } from './errors.js';
 import { ok, err } from '../result/result.js';
 import type { Result } from '../result/result.js';
 import { tokenize } from '../tokenizer/tokenize.js';
 import type { RawFieldToken, TokenizeResult } from '../tokenizer/tokenize.js';
 import { expandMacro } from './macros.js';
-import { fieldOrderFor, getFieldMeta } from './field-meta.js';
+import { fieldsFor } from './field-meta.js';
 import { parseField } from './field-parser.js';
-import { checkFieldCount } from '../validator/rules/field-count.js';
+import { fieldCountError } from '../validator/rules/field-count.js';
 import { unknownMacroError } from '../validator/rules/unknown-macro.js';
 
 export interface ParseOptions {
@@ -35,7 +35,7 @@ export interface ParseOptions {
  * // CronExpression { dialect: 'standard', fields: { month: { kind: 'range', from: 6, to: 8 }, ... } }
  * ```
  *
- * @throws {ParseError} when the expression is invalid.
+ * @throws {CronError} when the expression is invalid.
  */
 export function parse(expression: string, options: ParseOptions): CronExpression {
   const result = parseInternal(expression, options);
@@ -57,7 +57,7 @@ export function parse(expression: string, options: ParseOptions): CronExpression
 export function tryParse(
   expression: string,
   options: ParseOptions,
-): Result<CronExpression, ParseError> {
+): Result<CronExpression, CronError> {
   try {
     return parseInternal(expression, options);
   } catch (e) {
@@ -68,10 +68,10 @@ export function tryParse(
 function parseInternal(
   expression: string,
   options: ParseOptions,
-): Result<CronExpression, ParseError> {
+): Result<CronExpression, CronError> {
   if (typeof expression !== 'string') {
     return err(
-      new ParseError({
+      new CronError({
         message: 'Expression must be a string',
         code: 'not-a-string',
         errors: [
@@ -92,7 +92,7 @@ function parseInternal(
 
   if (tokens.kind === 'empty') {
     return err(
-      makeParseError(expression, 'empty-input', 'Expression is empty', [
+      makeCronError(expression, 'empty-input', 'Expression is empty', [
         {
           field: 'whole',
           position: { start: 0, end: expression.length },
@@ -106,7 +106,7 @@ function parseInternal(
 
   if (tokens.kind === 'unknown-macro') {
     const ve = unknownMacroError(tokens.lexeme, tokens.position);
-    return err(makeParseError(expression, ve.code, ve.message, [ve]));
+    return err(makeCronError(expression, ve.code, ve.message, [ve]));
   }
 
   if (tokens.kind === 'macro') {
@@ -121,7 +121,7 @@ function parseFromMacro(
   macro: MacroName,
   position: SourcePosition,
   mode: CronMode,
-): Result<CronExpression, ParseError> {
+): Result<CronExpression, CronError> {
   if (mode === 'quartz') {
     const ve: ValidationError = {
       field: 'whole',
@@ -130,7 +130,7 @@ function parseFromMacro(
       message: `Macro '${macro}' is a standard-mode shorthand; not valid in Quartz mode`,
       suggestion: "Use mode: 'standard' or 'auto', or write the expression out explicitly",
     };
-    return err(makeParseError(source, ve.code, ve.message, [ve]));
+    return err(makeCronError(source, ve.code, ve.message, [ve]));
   }
   const fields = expandMacro(macro);
   if (fields === null) {
@@ -144,16 +144,14 @@ function parseFromMacro(
       }),
     );
   }
-  return ok(
-    makeCronExpression({ source, dialect: 'standard', fields, macro, hasReboot: false }),
-  );
+  return ok(makeCronExpression({ source, dialect: 'standard', fields, macro, hasReboot: false }));
 }
 
 function parseFromFields(
   source: string,
   rawTokens: ReadonlyArray<RawFieldToken>,
   mode: CronMode,
-): Result<CronExpression, ParseError> {
+): Result<CronExpression, CronError> {
   const wholePos: SourcePosition = { start: 0, end: source.length };
 
   const dialect = resolveDialect(mode, rawTokens);
@@ -165,51 +163,27 @@ function parseFromFields(
       message: `Cannot auto-detect dialect from ${rawTokens.length} field(s); be explicit (mode: 'standard' | 'quartz')`,
       suggestion: null,
     };
-    return err(makeParseError(source, ve.code, ve.message, [ve]));
+    return err(makeCronError(source, ve.code, ve.message, [ve]));
   }
 
-  const fcErr = checkFieldCount(dialect, rawTokens.length, wholePos);
-  if (fcErr !== null) return err(makeParseError(source, fcErr.code, fcErr.message, [fcErr]));
-
-  const order = fieldOrderFor(dialect, rawTokens.length);
-  if (order === null) {
-    return err(
-      makeParseError(source, 'field-count-unknown', 'Unknown field count', [
-        {
-          field: 'whole',
-          position: wholePos,
-          code: 'field-count-unknown',
-          message: `Unsupported field count ${rawTokens.length}`,
-          suggestion: null,
-        },
-      ]),
-    );
+  const metas = fieldsFor(dialect, rawTokens.length);
+  if (metas === null) {
+    const ve = fieldCountError(dialect, rawTokens.length, wholePos);
+    return err(makeCronError(source, ve.code, ve.message, [ve]));
   }
 
   const errors: ValidationError[] = [];
   const built: Partial<Record<FieldName, FieldAst>> = {};
-  for (let i = 0; i < order.length; i++) {
-    const fname = order[i] as FieldName;
+  for (const [i, meta] of metas.entries()) {
     const raw = rawTokens[i] as RawFieldToken;
-    const meta = getFieldMeta(dialect, fname);
-    if (meta === null) {
-      errors.push({
-        field: fname,
-        position: raw.position,
-        code: 'unknown-field',
-        message: `Internal: no metadata for field ${fname}`,
-        suggestion: null,
-      });
-      continue;
-    }
     const r = parseField(raw.lexeme, raw.position, meta, dialect);
-    if (r.ok) built[fname] = r.ast;
+    if (r.ok) built[meta.name] = r.ast;
     else errors.push(...r.errors);
   }
 
   if (errors.length > 0) {
     const primary = errors[0] as ValidationError;
-    return err(makeParseError(source, primary.code, primary.message, errors));
+    return err(makeCronError(source, primary.code, primary.message, errors));
   }
 
   const fields: FieldSet =
@@ -223,9 +197,7 @@ function parseFromFields(
         }
       : assembleQuartzFieldSet(built);
 
-  return ok(
-    makeCronExpression({ source, dialect, fields, macro: null, hasReboot: false }),
-  );
+  return ok(makeCronExpression({ source, dialect, fields, macro: null, hasReboot: false }));
 }
 
 function assembleQuartzFieldSet(built: Partial<Record<FieldName, FieldAst>>): FieldSet {
@@ -254,19 +226,19 @@ function rebootFields(): FieldSet {
   return { minute: w, hour: w, dom: w, month: w, dow: w };
 }
 
-function makeParseError(
+function makeCronError(
   source: string,
   code: string,
   message: string,
   errors: ReadonlyArray<ValidationError>,
-): ParseError {
-  return new ParseError({ message, code, errors, source });
+): CronError {
+  return new CronError({ message, code, errors, source });
 }
 
-function wrapUnexpected(source: string, e: unknown): ParseError {
-  if (e instanceof ParseError) return e;
+function wrapUnexpected(source: string, e: unknown): CronError {
+  if (e instanceof CronError) return e;
   const message = e instanceof Error ? e.message : String(e);
-  return new ParseError({
+  return new CronError({
     message: `Unexpected error during parse: ${message}`,
     code: 'internal-error',
     errors: [
@@ -275,7 +247,7 @@ function wrapUnexpected(source: string, e: unknown): ParseError {
         position: { start: 0, end: source.length },
         code: 'internal-error',
         message: `Internal parser error: ${message}`,
-        suggestion: 'Please report this as a bug at https://github.com/battlefilm/cronforge',
+        suggestion: 'Please report this as a bug at https://github.com/axizof/cronforge/issues',
       },
     ],
     source,

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { nextOccurrences } from '../../../src/iterator/next-occurrences.js';
+import { parse } from '../../../src/parser/parse.js';
+import { CronError } from '../../../src/parser/errors.js';
 
 const START = new Date('2026-06-01T10:00:00Z');
 
@@ -14,7 +16,7 @@ describe('nextOccurrences - standard mode', () => {
     expect(Object.isFrozen(r)).toBe(true);
   });
 
-  it('every minute -> 3 successive minutes (US3 scenario 1)', () => {
+  it('every minute -> 3 successive minutes ', () => {
     const r = nextOccurrences('*/1 * * * *', 3, {
       mode: 'standard',
       startFrom: START,
@@ -79,36 +81,58 @@ describe('nextOccurrences - standard mode', () => {
     expect(r[4]?.toISOString()).toBe('2026-06-08T09:00:00.000Z');
   });
 
-  it('throws on @reboot', () => {
-    try {
-      nextOccurrences('@reboot', 1, { mode: 'standard', startFrom: START });
-      throw new Error('expected to throw');
-    } catch (e) {
-      expect((e as { code?: string }).code).toBe('reboot-not-iterable');
-    }
-  });
-
-  it('throws on negative count', () => {
-    expect(() => nextOccurrences('* * * * *', -1, { mode: 'standard', startFrom: START })).toThrow();
-  });
-
-  it('throws on count over 100_000', () => {
-    expect(() =>
-      nextOccurrences('* * * * *', 100_001, { mode: 'standard', startFrom: START }),
-    ).toThrow();
-  });
-
-  it('rejects invalid startFrom', () => {
-    expect(() =>
-      nextOccurrences('* * * * *', 1, { mode: 'standard', startFrom: new Date(NaN) }),
-    ).toThrow();
-  });
-
   it('accepts a pre-parsed CronExpression', () => {
-    // Use string for now to confirm CronExpression path elsewhere; this
-    // is the trivial branch.
-    const r = nextOccurrences('* * * * *', 1, { mode: 'standard', startFrom: START });
-    expect(r).toHaveLength(1);
+    const expr = parse('*/5 * * * *', { mode: 'standard' });
+    expect(nextOccurrences(expr, 1, { mode: 'standard', startFrom: START })).toEqual([
+      new Date('2026-06-01T10:05:00Z'),
+    ]);
+  });
+
+  it.each<[string, () => unknown]>([
+    [
+      'reboot-not-iterable',
+      () => nextOccurrences('@reboot', 1, { mode: 'standard', startFrom: START }),
+    ],
+    [
+      'invalid-count',
+      () => nextOccurrences('* * * * *', -1, { mode: 'standard', startFrom: START }),
+    ],
+    [
+      'invalid-count',
+      () => nextOccurrences('* * * * *', 1.5, { mode: 'standard', startFrom: START }),
+    ],
+    [
+      'count-too-large',
+      () => nextOccurrences('* * * * *', 100_001, { mode: 'standard', startFrom: START }),
+    ],
+    [
+      'invalid-start-from',
+      () => nextOccurrences('* * * * *', 1, { mode: 'standard', startFrom: new Date(NaN) }),
+    ],
+    [
+      'invalid-start-from',
+      () =>
+        nextOccurrences('* * * * *', 1, {
+          mode: 'standard',
+          startFrom: '2026-01-01' as unknown as Date,
+        }),
+    ],
+    [
+      'invalid-timezone',
+      () => nextOccurrences('* * * * *', 1, { mode: 'standard', timezone: 'Mars/Olympus' }),
+    ],
+    ['value-out-of-range', () => nextOccurrences('99 * * * *', 1, { mode: 'standard' })],
+  ])('throws a CronError with code %s', (code, run) => {
+    expect(run).toThrow(CronError);
+    expect(run).toThrow(expect.objectContaining({ code }));
+  });
+
+  it('gives up quickly on an expression that never fires', () => {
+    const started = Date.now();
+    expect(() => nextOccurrences('0 0 31 2 *', 1, { mode: 'standard', startFrom: START })).toThrow(
+      expect.objectContaining({ code: 'no-match-in-search-window' }),
+    );
+    expect(Date.now() - started).toBeLessThan(2000);
   });
 
   it('Feb 29 leap-year fires only on leap years', () => {

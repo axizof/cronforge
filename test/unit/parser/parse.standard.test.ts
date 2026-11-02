@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parse } from '../../../src/parser/parse.js';
+import { parse, tryParse } from '../../../src/parser/parse.js';
 
 describe('parse() - standard mode', () => {
   it('parses the all-wildcard expression', () => {
@@ -74,7 +74,13 @@ describe('parse() - standard mode', () => {
   });
 
   it('expands all schedule macros', () => {
-    const cases: ReadonlyArray<['@hourly' | '@daily' | '@midnight' | '@weekly' | '@monthly' | '@yearly' | '@annually', number, number]> = [
+    const cases: ReadonlyArray<
+      [
+        '@hourly' | '@daily' | '@midnight' | '@weekly' | '@monthly' | '@yearly' | '@annually',
+        number,
+        number,
+      ]
+    > = [
       ['@hourly', 0, -1],
       ['@daily', 0, 0],
       ['@midnight', 0, 0],
@@ -101,5 +107,17 @@ describe('parse() - standard mode', () => {
     expect(Object.isFrozen(expr)).toBe(true);
     expect(Object.isFrozen(expr.fields)).toBe(true);
     expect(Object.isFrozen(expr.fields.minute)).toBe(true);
+  });
+
+  it('accepts 7 as Sunday in day-of-week', () => {
+    expect(parse('0 0 * * 7', { mode: 'standard' }).fields.dow).toEqual({
+      kind: 'value',
+      value: 7,
+    });
+  });
+
+  it('rejects the Quartz-only V/N step form', () => {
+    const r = tryParse('5/15 * * * *', { mode: 'standard' });
+    expect(r.ok ? [] : r.error.errors.map((e) => e.code)).toEqual(['step-base-invalid']);
   });
 });

@@ -1,16 +1,20 @@
-import { matches } from './field-match.js';
-import { daysInMonth } from './tz.js';
-import type { CronExpression, FieldAst } from '../ast/nodes.js';
+import { QUARTZ_META, STANDARD_META } from '../parser/field-meta.js';
+import { matches } from '../ast/field-match.js';
+import { dayOfWeek, daysInMonth } from './tz.js';
 import type { WallClock } from './tz.js';
+import type { CronExpression, FieldAst } from '../ast/nodes.js';
+import type { ResolvedCronMode } from '../ast/dialect.js';
 
 /**
- * Match a wall-clock date against the expression's dom+dow constraints.
- * Standard cron uses OR semantics (POSIX); Quartz uses exclusive
- * semantics via `?`. Handles the Quartz-only `L`, `nL`, `nW`, `n#m`.
+ * Match a wall-clock date against the expression's dom + dow fields.
+ *
+ * Standard cron follows Vixie cron / cronie: when either field starts with
+ * `*` both must match, otherwise a day matching either one fires
+ * (`0 0 1 * MON` = the 1st of the month OR any Monday). Quartz requires `?`
+ * on one side, so only the other side applies.
  */
 export function dayMatches(expr: CronExpression, wc: WallClock): boolean {
-  const dom = expr.fields.dom;
-  const dow = expr.fields.dow;
+  const { dom, dow } = expr.fields;
 
   if (expr.dialect === 'quartz') {
     if (dom.kind === 'any') return matchDow(dow, wc, 'quartz');
@@ -18,94 +22,64 @@ export function dayMatches(expr: CronExpression, wc: WallClock): boolean {
     return matchDom(dom, wc) && matchDow(dow, wc, 'quartz');
   }
 
-  // Standard cron: a wildcard side neutralises the OR.
-  const domW = dom.kind === 'wildcard';
-  const dowW = dow.kind === 'wildcard';
-  if (domW && dowW) return true;
-  if (domW) return matchDow(dow, wc, 'standard');
-  if (dowW) return matchDom(dom, wc);
+  if (startsWithStar(dom) || startsWithStar(dow)) {
+    return matchDom(dom, wc) && matchDow(dow, wc, 'standard');
+  }
   return matchDom(dom, wc) || matchDow(dow, wc, 'standard');
+}
+
+export function startsWithStar(ast: FieldAst): boolean {
+  return ast.kind === 'wildcard' || (ast.kind === 'step' && ast.base.kind === 'wildcard');
 }
 
 function matchDom(dom: FieldAst, wc: WallClock): boolean {
   switch (dom.kind) {
-    case 'lastDom': {
-      const lastDay = daysInMonth(wc.year, wc.month);
-      return wc.day === lastDay - dom.offset;
-    }
+    case 'lastDom':
+      return wc.day === daysInMonth(wc.year, wc.month) - dom.offset;
+    case 'lastWeekday':
+      return wc.day === lastWeekdayOfMonth(wc.year, wc.month);
     case 'weekdayNearest':
-      return matchWeekdayNearest(dom.day, wc);
+      return wc.day === nearestWeekday(dom.day, wc.year, wc.month);
     default:
-      return matches(dom, wc.day);
+      return matches(dom, wc.day, STANDARD_META.dom);
   }
 }
 
-function matchDow(dow: FieldAst, wc: WallClock, dialect: 'standard' | 'quartz'): boolean {
+function matchDow(dow: FieldAst, wc: WallClock, dialect: ResolvedCronMode): boolean {
   switch (dow.kind) {
+    // `nL` and `n#m` only exist in Quartz, where SUN = 1.
     case 'lastDow':
-      return matchLastDow(dow.weekday, wc, dialect);
+      return wc.dow === dow.weekday - 1 && daysInMonth(wc.year, wc.month) - wc.day < 7;
     case 'nthDow':
-      return matchNthDow(dow.weekday, dow.nth, wc, dialect);
+      return wc.dow === dow.weekday - 1 && Math.ceil(wc.day / 7) === dow.nth;
     default:
-      return matches(dow, encodeWeekday(wc.dow, dialect));
+      if (dialect === 'quartz') return matches(dow, wc.dow + 1, QUARTZ_META.dow);
+      return (
+        matches(dow, wc.dow, STANDARD_META.dow) ||
+        (wc.dow === 0 && matches(dow, 7, STANDARD_META.dow))
+      );
   }
 }
 
-function encodeWeekday(stdDow: number, dialect: 'standard' | 'quartz'): number {
-  return dialect === 'standard' ? stdDow : stdDow + 1;
-}
-
-function decodeWeekday(encoded: number, dialect: 'standard' | 'quartz'): number {
-  if (dialect === 'standard') return encoded % 7;
-  return ((encoded - 1) % 7 + 7) % 7;
-}
-
-function matchLastDow(
-  encodedWeekday: number,
-  wc: WallClock,
-  dialect: 'standard' | 'quartz',
-): boolean {
-  const targetStd = decodeWeekday(encodedWeekday, dialect);
-  if (wc.dow !== targetStd) return false;
-  // Last occurrence is the one with < 7 days left in the month.
-  return daysInMonth(wc.year, wc.month) - wc.day < 7;
-}
-
-function matchNthDow(
-  encodedWeekday: number,
-  nth: 1 | 2 | 3 | 4 | 5,
-  wc: WallClock,
-  dialect: 'standard' | 'quartz',
-): boolean {
-  const targetStd = decodeWeekday(encodedWeekday, dialect);
-  if (wc.dow !== targetStd) return false;
-  return Math.ceil(wc.day / 7) === nth;
+function lastWeekdayOfMonth(year: number, month: number): number {
+  const last = daysInMonth(year, month);
+  const dow = dayOfWeek(year, month, last);
+  if (dow === 6) return last - 1;
+  if (dow === 0) return last - 2;
+  return last;
 }
 
 /**
- * Quartz `W`: nearest weekday to `targetDay` without crossing month
- * boundary. Saturday → previous Friday (or Mon +2 if target was day 1).
- * Sunday → next Monday (or Fri -2 if Mon spills into next month).
+ * Quartz `nW`: the weekday nearest to day `n`, without leaving the month.
+ * Saturday → Friday before (or Monday after when `n` is the 1st); Sunday →
+ * Monday after (or Friday before when `n` is the last day). `null` when the
+ * month has no day `n`.
  */
-function matchWeekdayNearest(targetDay: number, wc: WallClock): boolean {
-  const last = daysInMonth(wc.year, wc.month);
-  if (targetDay < 1 || targetDay > last) return false;
-
-  const targetDow = wallClockDowFor(wc.year, wc.month, targetDay);
-  if (targetDow >= 1 && targetDow <= 5) return wc.day === targetDay;
-  if (targetDow === 6) {
-    return wc.day === (targetDay === 1 ? targetDay + 2 : targetDay - 1);
-  }
-  return wc.day === (targetDay + 1 > last ? targetDay - 2 : targetDay + 1);
-}
-
-function wallClockDowFor(year: number, month: number, day: number): number {
-  let y = year;
-  let m = month;
-  if (m < 3) { m += 12; y -= 1; }
-  const k = y % 100;
-  const j = Math.floor(y / 100);
-  const h =
-    (day + Math.floor((13 * (m + 1)) / 5) + k + Math.floor(k / 4) + Math.floor(j / 4) + 5 * j) % 7;
-  return (h + 6) % 7;
+function nearestWeekday(target: number, year: number, month: number): number | null {
+  const last = daysInMonth(year, month);
+  if (target > last) return null;
+  const dow = dayOfWeek(year, month, target);
+  if (dow === 6) return target === 1 ? 3 : target - 1;
+  if (dow === 0) return target === last ? target - 2 : target + 1;
+  return target;
 }

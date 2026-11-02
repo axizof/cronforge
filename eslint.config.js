@@ -1,49 +1,25 @@
 // @ts-check
-import tsParser from '@typescript-eslint/parser';
-import tsPlugin from '@typescript-eslint/eslint-plugin';
+import js from '@eslint/js';
+import tseslint from 'typescript-eslint';
 
-/** @type {import('eslint').Linter.FlatConfig[]} */
-export default [
+export default tseslint.config(
+  { ignores: ['node_modules/', 'dist/', 'coverage/'] },
+  js.configs.recommended,
+  ...tseslint.configs.strict,
   {
-    ignores: [
-      'node_modules/**',
-      'dist/**',
-      'coverage/**',
-      '**/*.d.ts',
-      '**/*.d.mts',
-      '**/*.d.cts',
-    ],
-  },
-  {
-    files: ['src/**/*.ts', 'test/**/*.ts'],
-    languageOptions: {
-      parser: tsParser,
-      parserOptions: {
-        ecmaVersion: 2022,
-        sourceType: 'module',
-        project: false,
-      },
-    },
-    plugins: {
-      '@typescript-eslint': tsPlugin,
-    },
     rules: {
-      ...tsPlugin.configs.recommended.rules,
-      '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unused-vars': [
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
       'no-console': 'error',
-      'eqeqeq': ['error', 'always', { null: 'ignore' }],
-      'curly': ['error', 'multi-line'],
+      eqeqeq: ['error', 'always', { null: 'ignore' }],
+      curly: ['error', 'multi-line'],
     },
   },
   {
-    files: ['test/**/*.ts', '*.config.ts', '*.config.js'],
-    rules: {
-      '@typescript-eslint/no-explicit-any': 'off',
-      'no-console': 'off',
-    },
+    files: ['scripts/**', '*.config.*'],
+    languageOptions: { globals: { console: 'readonly', process: 'readonly', URL: 'readonly' } },
+    rules: { 'no-console': 'off' },
   },
-];
+);

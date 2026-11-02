@@ -102,7 +102,7 @@ function parseStep(
   slashIdx: number,
   position: SourcePosition,
   meta: FieldMeta,
-  _dialect: ResolvedCronMode,
+  dialect: ResolvedCronMode,
 ): FieldParseResult {
   const baseStr = lexeme.slice(0, slashIdx);
   const stepStr = lexeme.slice(slashIdx + 1);
@@ -142,8 +142,8 @@ function parseStep(
       message: `Step '${stepStr}' must be a positive integer in ${meta.name}`,
       suggestion: null,
     });
-  } else {
-    const stepErr = checkStep(baseKind, step, meta.name, position);
+  } else if (baseErrors.length === 0) {
+    const stepErr = checkStep(baseKind, step, dialect, meta.name, position);
     if (stepErr !== null) errors.push(stepErr);
   }
 
@@ -193,11 +193,7 @@ function parseRange(
   };
 }
 
-function parseValue(
-  lexeme: string,
-  position: SourcePosition,
-  meta: FieldMeta,
-): FieldParseResult {
+function parseValue(lexeme: string, position: SourcePosition, meta: FieldMeta): FieldParseResult {
   if (lexeme === '?') {
     return failure(
       checkQuartzOnlyFeature('?', 'standard', meta.name, position) ?? {
@@ -225,9 +221,7 @@ function findRangeDash(lexeme: string): number {
 }
 
 function parseIntStrict(s: string): number | null {
-  if (!/^\d+$/u.test(s)) return null;
-  const n = Number.parseInt(s, 10);
-  return Number.isFinite(n) ? n : null;
+  return /^\d+$/u.test(s) ? Number(s) : null;
 }
 
 function resolveLiteral(lexeme: string, meta: FieldMeta): number | null {
@@ -239,11 +233,7 @@ function resolveLiteral(lexeme: string, meta: FieldMeta): number | null {
   return null;
 }
 
-function literalError(
-  lexeme: string,
-  meta: FieldMeta,
-  position: SourcePosition,
-): ValidationError {
+function literalError(lexeme: string, meta: FieldMeta, position: SourcePosition): ValidationError {
   const hint =
     meta.mnemonics !== undefined
       ? `Allowed: ${meta.min}–${meta.max} or ${Object.keys(meta.mnemonics).join(', ')}`

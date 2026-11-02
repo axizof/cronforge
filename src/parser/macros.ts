@@ -4,12 +4,12 @@ import type { FieldAst, FieldSet } from '../ast/nodes.js';
 import type { MacroName } from '../ast/dialect.js';
 
 const MACRO_FIELDS: Readonly<Record<Exclude<MacroName, '@reboot'>, FieldSet>> = deepFreeze({
-  '@hourly':   buildFieldSet({ minute: value(0) }),
-  '@daily':    buildFieldSet({ minute: value(0), hour: value(0) }),
+  '@hourly': buildFieldSet({ minute: value(0) }),
+  '@daily': buildFieldSet({ minute: value(0), hour: value(0) }),
   '@midnight': buildFieldSet({ minute: value(0), hour: value(0) }),
-  '@weekly':   buildFieldSet({ minute: value(0), hour: value(0), dow: value(0) }),
-  '@monthly':  buildFieldSet({ minute: value(0), hour: value(0), dom: value(1) }),
-  '@yearly':   buildFieldSet({
+  '@weekly': buildFieldSet({ minute: value(0), hour: value(0), dow: value(0) }),
+  '@monthly': buildFieldSet({ minute: value(0), hour: value(0), dom: value(1) }),
+  '@yearly': buildFieldSet({
     minute: value(0),
     hour: value(0),
     dom: value(1),
@@ -24,8 +24,14 @@ const MACRO_FIELDS: Readonly<Record<Exclude<MacroName, '@reboot'>, FieldSet>> = 
 });
 
 const RECOGNISED_MACROS: ReadonlySet<MacroName> = new Set([
-  '@hourly', '@daily', '@midnight', '@weekly',
-  '@monthly', '@yearly', '@annually', '@reboot',
+  '@hourly',
+  '@daily',
+  '@midnight',
+  '@weekly',
+  '@monthly',
+  '@yearly',
+  '@annually',
+  '@reboot',
 ]);
 
 /** Return the standard-mode field expansion, or `null` for `@reboot`. */

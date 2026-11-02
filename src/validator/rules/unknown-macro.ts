@@ -1,10 +1,7 @@
 import type { SourcePosition } from '../../ast/dialect.js';
 import type { ValidationError } from '../../parser/errors.js';
 
-export function unknownMacroError(
-  lexeme: string,
-  position: SourcePosition,
-): ValidationError {
+export function unknownMacroError(lexeme: string, position: SourcePosition): ValidationError {
   return {
     field: 'whole',
     position,

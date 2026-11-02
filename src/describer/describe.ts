@@ -1,82 +1,62 @@
 import { parse } from '../parser/parse.js';
 import type { CronMode } from '../ast/dialect.js';
 import type { CronExpression } from '../ast/nodes.js';
-import { localeRegistry } from './locales/index.js';
+import { EN, resolveLocale } from './locales/index.js';
 import type { Locale } from './locales/index.js';
-import { enLocale } from './locales/en.js';
-import { frLocale } from './locales/fr.js';
-import { esLocale } from './locales/es.js';
-import { deLocale } from './locales/de.js';
-import { itLocale } from './locales/it.js';
 import { renderTime } from './render/time.js';
 import { renderDay } from './render/day.js';
-import { renderMonth } from './render/month.js';
-import { renderYear } from './render/year.js';
-
-let initialised = false;
-function ensureBuiltinLocales(): void {
-  if (initialised) return;
-  initialised = true;
-  localeRegistry.register('en', enLocale);
-  localeRegistry.register('fr', frLocale);
-  localeRegistry.register('es', esLocale);
-  localeRegistry.register('de', deLocale);
-  localeRegistry.register('it', itLocale);
-}
+import { renderMonth, renderYear } from './render/calendar.js';
+import { phrase } from './render/text.js';
 
 export interface DescribeOptions {
   readonly mode: CronMode;
   readonly locale: Locale;
+  /** Called when `locale` is not registered and English is used instead. */
   readonly onFallback?: (requested: Locale, used: Locale) => void;
 }
 
 /**
- * Render a cron expression as human-readable text in the chosen locale.
- * Accepts either a raw cron string or a pre-parsed `CronExpression`.
- * Falls back to English when the requested locale is not registered.
+ * Describe a cron expression in natural language. Accepts a cron string or a
+ * `CronExpression` returned by `parse()`. Falls back to English when the
+ * requested locale is not registered.
+ *
+ * @throws {CronError} when given an invalid cron string.
  *
  * @example
  * ```ts
  * import { describe } from 'cronforge';
  *
- * describe('* * * 6-8 *',    { mode: 'standard', locale: 'en' });
- * // 'Every minute, June through August'
+ * describe('*\/10 9-17 * * 1-5', { mode: 'standard', locale: 'en' });
+ * // 'Every 10 minutes, between 9:00 AM and 5:59 PM, from Monday through Friday'
  *
- * describe('0 0 12 ? * MON', { mode: 'quartz',   locale: 'fr' });
- * // 'À 12h00, uniquement le lundi'
+ * describe('0 30 8 ? * MON', { mode: 'quartz', locale: 'fr' });
+ * // 'À 08h30, uniquement le lundi'
  * ```
  */
-export function describe(
-  input: string | CronExpression,
-  options: DescribeOptions,
-): string {
-  ensureBuiltinLocales();
+export function describe(input: string | CronExpression, options: DescribeOptions): string {
+  const expr = typeof input === 'string' ? parse(input, { mode: options.mode }) : input;
 
-  const expr: CronExpression =
-    typeof input === 'string' ? parse(input, { mode: options.mode }) : input;
+  const { data: locale, used } = resolveLocale(options.locale);
+  if (used !== options.locale) options.onFallback?.(options.locale, used);
 
-  const resolved = localeRegistry.resolve(options.locale);
-  if (resolved.fellBack && options.onFallback !== undefined) {
-    options.onFallback(options.locale, resolved.used);
-  }
-  const locale = resolved.data;
-
-  if (expr.macro !== null && locale.phrases !== undefined) {
-    const phrase = locale.phrases[expr.macro];
-    if (phrase !== undefined) return phrase;
+  if (expr.macro !== null) {
+    const macroPhrase = locale.phrases?.[expr.macro] ?? EN.phrases?.[expr.macro];
+    if (macroPhrase !== undefined) return macroPhrase;
   }
 
-  const timePart = renderTime(expr.fields, locale);
-  const monthIsWildcard = expr.fields.month.kind === 'wildcard';
-  const dayPart = renderDay(expr.fields, expr.dialect, monthIsWildcard, locale);
-  const monthPart = renderMonth(expr.fields.month, locale);
-  const yearPart = renderYear(expr.fields.year, locale);
+  const time = renderTime(expr.fields, locale);
+  const day = renderDay(expr.fields, expr.dialect, locale);
+  const month = renderMonth(expr.fields.month, locale);
+  const year = renderYear(expr.fields.year, locale);
 
-  let out = timePart;
-  if (dayPart !== null) {
-    out += dayPart.leadingComma ? `, ${dayPart.phrase}` : ` ${dayPart.phrase}`;
+  const parts = [time.text];
+  if (day !== null) parts.push(day);
+  else if (time.isFixedTime && month === null && year === null) {
+    parts.push(phrase(locale, 'every_day'));
   }
-  if (monthPart !== null) out += `, ${monthPart}`;
-  if (yearPart !== null) out += `, ${yearPart}`;
-  return out;
+  if (month !== null) parts.push(month);
+  if (year !== null) parts.push(year);
+
+  const text = parts.join(', ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }

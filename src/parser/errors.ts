@@ -17,20 +17,22 @@ export interface ValidationResult {
 }
 
 /**
- * Thrown by `parse()` and `build()`. Returned (not thrown) by `tryParse()`
- * and `buildResult()`.
+ * Error thrown by `parse()`, `build()`, `describe()` and `nextOccurrences()`.
+ * `code` is stable across versions. `errors` lists every problem found in
+ * the expression and is empty for usage errors (bad `count`, timezone…).
+ * `tryParse()` returns it instead of throwing.
  *
  * @example
  * ```ts
  * try {
  *   parse('not a cron', { mode: 'standard' });
  * } catch (e) {
- *   if (e instanceof ParseError) console.log(e.code, e.errors);
+ *   if (e instanceof CronError) console.log(e.code, e.errors);
  * }
  * ```
  */
-export class ParseError extends Error {
-  override readonly name = 'ParseError';
+export class CronError extends Error {
+  override readonly name = 'CronError';
   readonly code: string;
   readonly errors: ReadonlyArray<ValidationError>;
   readonly source: string;
@@ -45,6 +47,5 @@ export class ParseError extends Error {
     this.code = args.code;
     this.errors = Object.freeze([...args.errors]);
     this.source = args.source;
-    Object.setPrototypeOf(this, ParseError.prototype);
   }
 }

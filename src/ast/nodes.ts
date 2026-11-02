@@ -10,6 +10,8 @@ export type FieldAst =
   | { readonly kind: 'step'; readonly base: FieldAst; readonly step: number }
   | { readonly kind: 'list'; readonly members: ReadonlyArray<FieldAst> }
   | { readonly kind: 'lastDom'; readonly offset: number }
+  /** Quartz `LW`: last Monday–Friday of the month. */
+  | { readonly kind: 'lastWeekday' }
   | { readonly kind: 'lastDow'; readonly weekday: number }
   | { readonly kind: 'weekdayNearest'; readonly day: number }
   | {
@@ -39,7 +41,7 @@ export interface CronExpression {
   readonly hasReboot: boolean;
 }
 
-export interface MakeCronExpressionInput {
+interface MakeCronExpressionInput {
   readonly source: string;
   readonly dialect: ResolvedCronMode;
   readonly fields: FieldSet;
@@ -62,8 +64,4 @@ export function makeCronExpression(input: MakeCronExpressionInput): CronExpressi
 
 export function wildcardField(): FieldAst {
   return deepFreeze({ kind: 'wildcard' } as const);
-}
-
-export function anyField(): FieldAst {
-  return deepFreeze({ kind: 'any' } as const);
 }

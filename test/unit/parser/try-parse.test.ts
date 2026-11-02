@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { tryParse } from '../../../src/parser/parse.js';
-import { ParseError } from '../../../src/parser/errors.js';
+import { CronError } from '../../../src/parser/errors.js';
 
 describe('tryParse()', () => {
   it('returns ok for a valid expression', () => {
@@ -14,7 +14,7 @@ describe('tryParse()', () => {
     const r = tryParse('', { mode: 'standard' });
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error('unreachable');
-    expect(r.error).toBeInstanceOf(ParseError);
+    expect(r.error).toBeInstanceOf(CronError);
     expect(r.error.code).toBe('empty-input');
   });
 

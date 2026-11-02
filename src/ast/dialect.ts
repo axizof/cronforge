@@ -5,26 +5,11 @@ export type CronMode = 'standard' | 'quartz' | 'auto';
 export type ResolvedCronMode = 'standard' | 'quartz';
 
 /** Field identifier used in errors and per-field rendering. */
-export type FieldName =
-  | 'seconds'
-  | 'minute'
-  | 'hour'
-  | 'dom'
-  | 'month'
-  | 'dow'
-  | 'year'
-  | 'whole';
+export type FieldName = 'seconds' | 'minute' | 'hour' | 'dom' | 'month' | 'dow' | 'year' | 'whole';
 
 /** Recognised cron macros. */
 export type MacroName =
-  | '@hourly'
-  | '@daily'
-  | '@midnight'
-  | '@weekly'
-  | '@monthly'
-  | '@yearly'
-  | '@annually'
-  | '@reboot';
+  '@hourly' | '@daily' | '@midnight' | '@weekly' | '@monthly' | '@yearly' | '@annually' | '@reboot';
 
 /** Half-open `[start, end)` character offsets in the source. */
 export interface SourcePosition {
@@ -32,7 +17,7 @@ export interface SourcePosition {
   readonly end: number;
 }
 
-export const QUARTZ_ONLY_CHARS = ['?', 'L', 'W', '#'] as const;
+const QUARTZ_ONLY_CHARS = ['?', 'L', 'W', '#'] as const;
 
 /**
  * Detect the dialect of a tokenised expression from its raw whitespace-split
@@ -51,7 +36,7 @@ export function detectDialect(rawFields: ReadonlyArray<string>): ResolvedCronMod
   return null;
 }
 
-export function containsQuartzOnlyChars(rawFields: ReadonlyArray<string>): boolean {
+function containsQuartzOnlyChars(rawFields: ReadonlyArray<string>): boolean {
   for (const field of rawFields) {
     for (const ch of QUARTZ_ONLY_CHARS) {
       if (field.includes(ch)) return true;
