@@ -3,11 +3,18 @@
 Parse, validate, describe and schedule cron expressions in TypeScript, with no runtime
 dependencies.
 
-- Standard Unix cron (5 fields) and Quartz (6 or 7 fields, with seconds and year).
-- Human-readable descriptions in English, French, Spanish, German and Italian. You can add
-  more languages at runtime.
-- Next run times in any IANA timezone, with documented behaviour around DST changes.
-- A builder that turns form-style input into a valid expression.
+## Features
+
+- **Plain-language descriptions**: `*/15 9-17 * * 1-5` becomes "Every 15 minutes, between
+  9:00 AM and 5:59 PM, from Monday through Friday", in English, French, Spanish, German or
+  Italian. You can add more languages at runtime. [Examples](#cron-to-plain-language)
+- **Validation for forms**: every error has a stable code, the field it belongs to and its
+  position in the input, so you can highlight it and translate the message.
+- **Next run times** in any IANA timezone, with a defined behaviour when clocks change for
+  daylight saving time.
+- **Builder**: turns form-style input (days, times, ranges) into a valid expression.
+- **Two dialects**: standard Unix cron (5 fields, `@daily`…) and Quartz (6 or 7 fields with
+  seconds and year, `L`, `W`, `#`), never mixed up.
 - ESM and CommonJS builds with type definitions. Runs on Node.js 22+ and in browsers.
 
 It computes schedules but does not run jobs. To run them, use a scheduler such as
@@ -47,6 +54,49 @@ build(
   { mode: 'standard' },
 );
 // '0 9 * * 1,3,5'
+```
+
+## Cron to plain language
+
+`describe` covers every field form (lists, ranges, steps, Quartz extensions), not just the
+common shortcuts.
+
+| Expression                | `describe(expression, { mode, locale: 'en' })`                            |
+| ------------------------- | ------------------------------------------------------------------------- |
+| `*/5 * * * *`             | Every 5 minutes                                                           |
+| `0 * * * *`               | Every hour                                                                |
+| `30 9 * * *`              | At 9:30 AM, every day                                                     |
+| `0 9 * * 1-5`             | At 9:00 AM, from Monday through Friday                                    |
+| `0 9 * * MON,WED,FRI`     | At 9:00 AM, on Monday, Wednesday and Friday                               |
+| `0 0 1,15 * *`            | At 12:00 AM, on the 1st and 15th of the month                             |
+| `0 0 1 */3 *`             | At 12:00 AM, on the 1st of the month, in January, April, July and October |
+| `@weekly`                 | Every Sunday, at midnight                                                 |
+| `*/30 * * ? * *` (Quartz) | Every 30 seconds                                                          |
+| `0 0 18 LW * ?` (Quartz)  | At 6:00 PM, on the last weekday of the month                              |
+| `0 0 9 ? * 2#1` (Quartz)  | At 9:00 AM, on the first Monday of the month                              |
+| `0 0 17 ? * 6L` (Quartz)  | At 5:00 PM, on the last Friday of the month                               |
+
+The same expression, `*/15 9-17 * * 1-5`, in each built-in language:
+
+| `locale` | Description                                                               |
+| -------- | ------------------------------------------------------------------------- |
+| `en`     | Every 15 minutes, between 9:00 AM and 5:59 PM, from Monday through Friday |
+| `fr`     | Toutes les 15 minutes, entre 09h00 et 17h59, du lundi au vendredi         |
+| `es`     | Cada 15 minutos, entre las 09:00 y las 17:59, de lunes a viernes          |
+| `de`     | Alle 15 Minuten, zwischen 09:00 und 17:59, von Montag bis Freitag         |
+| `it`     | Ogni 15 minuti, tra le 09:00 e le 17:59, da lunedì a venerdì              |
+
+A typical use is a live preview under a schedule form:
+
+```ts
+const expression = build(
+  { kind: 'daysOfWeek', days: ['MON', 'THU'], at: { hour: 18, minute: 30 } },
+  { mode: 'standard' },
+);
+// '30 18 * * 1,4'
+
+describe(expression, { mode: 'standard', locale: 'fr' });
+// 'À 18h30, le lundi et jeudi'
 ```
 
 ## Dialects
